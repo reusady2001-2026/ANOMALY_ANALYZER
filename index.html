@@ -677,6 +677,7 @@ function runAnalysis(){if(!DATA)return;const pp=getP("ppInput");
   if(pp<=0){alert("Please enter a Purchase Price before running analysis.");return;}
   if(!document.getElementById("aiState").value){alert("Please select a State before running analysis.");return;}
   if(!document.getElementById("aiCity").value.trim()){alert("Please enter a City before running analysis.");return;}
+  window._aiCache={};
   if(pp>0)savePriceToHistory(pp);document.getElementById("thresholdInfo").textContent=`10bps: $${fmt(Math.round((pp*0.001)/12))}/mo`;
   const[fi,ti]=getPeriodIndices("periodFrom","periodTo");
   const maxTo=DATA.months.length-SKIP-1;
@@ -1119,6 +1120,7 @@ function saveCurrentSession(fileName){
     data:DATA,results:RESULTS,sliced:sliced,slicedSkip:window._slicedSkip,
     reasonResults:window.reasonResults||null,dataContext:window._dataContext||null,
     chatHistory:chatHistory||[],
+    aiCache:window._aiCache||{},
   };
   pushSessionToCloud(session);
 }
@@ -1146,6 +1148,7 @@ function saveCompSession(){
     reasonResults:window.reasonResults||null,
     compReasonResults:compReasonResults||{},
     chatHistory:chatHistory||[],
+    aiCache:window._aiCache||{},
   };
   pushSessionToCloud(session);
 }
@@ -1158,6 +1161,7 @@ function restoreSession(session){
   window._sliced=session.sliced;window._slicedSkip=session.slicedSkip;
   window.reasonResults=session.reasonResults||null;reasonResults=session.reasonResults||null;
   window._dataContext=session.dataContext||null;chatHistory=session.chatHistory||[];
+  window._aiCache=session.aiCache||{};
   cachedContext=null;cachedContext=buildDataContext();
   contextStatus=session.reasonResults?.lookup&&Object.keys(session.reasonResults.lookup).length>0?"done":"idle";
   document.getElementById("aiState").value=session.state||"";
@@ -1181,6 +1185,7 @@ function restoreSession(session){
 function restoreCompSession(session){
   console.log("[RestoreComp] Starting, properties:",session.properties?.length);
   chatHistory=session.chatHistory||[];
+  window._aiCache=session.aiCache||{};
   cachedContext=null;
   reasonResults=session.reasonResults||null;
   window.reasonResults=reasonResults;
@@ -1560,9 +1565,8 @@ document.addEventListener("click",function(e){
   if(!data){body.innerHTML='<div class="ai-error">No explanation data available.</div>';return;}
   let html='<div style="margin-bottom:12px;font-size:13px;font-weight:700;color:#eeeef4;">'+metricName+" \u2014 "+month+"</div>"+renderReasonPanel(data);
   // Check if AI deep analysis was already done
-  const aiCacheKey="aiDeep_"+metricName+"_"+month;
-  let cachedAI=null;
-  try{cachedAI=JSON.parse(localStorage.getItem(aiCacheKey));}catch(e){}
+  const aiCacheKey=metricName+"_"+month;
+  const cachedAI=(window._aiCache||{})[aiCacheKey]||null;
   if(cachedAI){
     html+='<div style="margin-top:16px;border-top:1px solid #2a2a38;padding-top:12px;">';
     html+='<div style="font-size:11px;color:#a78bfa;font-weight:700;margin-bottom:8px;">\ud83e\udde0 AI Deep Analysis <span style="font-weight:400;font-size:9px;opacity:0.7;">(cached)</span></div>';
@@ -1601,9 +1605,11 @@ document.addEventListener("click",function(e){
   fetch("/api/analyze-reasons",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({mode:"explain",context:cachedContext||buildDataContext(),anomaly,...ctx})})
   .then(resp=>{if(!resp.ok)throw new Error("API error "+resp.status);return resp.json();})
   .then(data=>{
-    // Save to localStorage
-    const aiCacheKey="aiDeep_"+metricName+"_"+month;
-    try{localStorage.setItem(aiCacheKey,JSON.stringify(data));}catch(e){}
+    // Save to in-memory cache and auto-persist to Supabase via session
+    const aiCacheKey=metricName+"_"+month;
+    if(!window._aiCache)window._aiCache={};
+    window._aiCache[aiCacheKey]=data;
+    if(window._currentFileName)saveCurrentSession(window._currentFileName);
     let h='<div style="margin-top:12px;border-top:1px solid #3b1f7a;padding-top:12px;"><div style="font-size:11px;color:#a78bfa;font-weight:700;margin-bottom:8px;">\ud83e\udde0 AI Deep Analysis</div>';
     if(data.primaryReason)h+='<div class="ai-card"><div class="ai-card-primary"><strong>'+(data.primaryReason.category||"")+":</strong> "+(data.primaryReason.explanation||"")+"</div></div>";
     if(data.alternatives?.length){h+='<div class="ai-card"><div class="ai-card-alts">';data.alternatives.forEach((a,i)=>{h+="<div><strong>"+(i+1)+". "+(a.category||"")+":</strong> "+(a.explanation||"")+"</div>";});h+="</div></div>";}
