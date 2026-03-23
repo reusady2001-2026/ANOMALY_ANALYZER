@@ -1102,7 +1102,10 @@ function saveSessions(sessions){
       try{localStorage.setItem(SESSION_KEY,JSON.stringify(toSave));}catch(e3){
         console.warn('Last resort — metadata only:',e3);
         const lite=toSave.map(s=>({mode:s.mode,fileName:s.fileName,savedAt:s.savedAt,monthCount:s.monthCount,metricCount:s.metricCount,state:s.state,city:s.city,price:s.price,propType:s.propType,data:s.data,results:s.results,sliced:s.sliced,slicedSkip:s.slicedSkip,reasonResults:s.reasonResults||null}));
-        try{localStorage.setItem(SESSION_KEY,JSON.stringify(lite));}catch(e4){console.error('Session save completely failed:',e4);}
+        try{localStorage.setItem(SESSION_KEY,JSON.stringify(lite));}catch(e4){
+          console.warn('Metadata save failed, clearing old sessions and retrying:',e4);
+          try{localStorage.removeItem(SESSION_KEY);localStorage.setItem(SESSION_KEY,JSON.stringify(lite.slice(0,1)));console.info('Session saved after clearing old data');}catch(e5){console.error('Session save completely failed:',e5);}
+        }
       }
     }
   }
