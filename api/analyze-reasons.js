@@ -92,7 +92,7 @@ TASK: Answer the user's question about the data. Calculate, compare, explain det
     const r = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-api-key": API_KEY, "anthropic-version": "2023-06-01" },
-      body: JSON.stringify({ model: "claude-sonnet-4-5-20250929", max_tokens: 8000, system, messages })
+      body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 8000, system, messages })
     });
     if (!r.ok) { const e = await r.text(); return res.status(r.status).json({ error: e }); }
     const data = await r.json();
