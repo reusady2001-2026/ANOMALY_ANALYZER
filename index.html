@@ -373,7 +373,7 @@
   <div id="compProperties"></div>
   <div class="controls" style="border-top:1px solid #1e3050;">
     <div class="ctrl-group"><label>&nbsp;</label><button class="btn" id="addPropertyBtn" style="background:#6d28d9;border-color:#6d28d9;color:#fff;">+ Add Property</button></div>
-    <div class="ctrl-group"><label>&nbsp;</label><button class="btn" id="compFileHistBtn" title="Recent sessions">📂 ▾</button></div>
+    <div class="ctrl-group"><label>&nbsp;</label><button class="btn" id="compFileHistBtn" title="Recent sessions">📂 ▾</button><div class="file-hist-dropdown hidden" id="compFileHistDropdown"></div></div>
     <div class="ctrl-group"><label>&nbsp;</label><button class="btn btn-primary hidden" id="compRunBtn">Compare</button></div>
   </div>
   <div class="controls hidden" id="compFilters">
@@ -1220,16 +1220,18 @@ function restoreCompSession(session){
   if(msgs&&chatHistory.length){msgs.innerHTML="";chatHistory.forEach(m=>{msgs.innerHTML+='<div class="chat-msg '+(m.role==="user"?"user":"ai")+'">'+m.content.replace(/\n/g,"<br>")+'</div>';});}
 }
 
-function renderFileHistory(){
-  const dd=document.getElementById("fileHistDropdown");
-  const sessions=loadSessions();
-  if(!sessions.length){dd.innerHTML='<div class="file-hist-empty">No recent files</div>';return;}
+function renderFileHistory(ddId, modeFilter){
+  const dd=document.getElementById(ddId);
+  const sessions=loadSessions().filter(s=>!modeFilter||s.mode===modeFilter);
+  if(!sessions.length){dd.innerHTML='<div class="file-hist-empty">No recent '+(modeFilter==='comparison'?'comparisons':'analyses')+'</div>';return;}
   dd.innerHTML=sessions.map((s,i)=>{
+    // Store global index for restore
+    const globalIdx=loadSessions().indexOf(s);
     const d=new Date(s.savedAt);
     const dateStr=d.toLocaleDateString()+" "+d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
-    const loc=[s.city,s.state].filter(Boolean).join(", ");
+    const loc=s.mode==='comparison'?(s.properties||[]).map(p=>[p.city,p.state].filter(Boolean).join(", ")).filter(Boolean).join(" / "):[s.city,s.state].filter(Boolean).join(", ");
     const modeLabel=s.mode==='comparison'?'⚖️ ':'📊 ';
-    return '<div class="file-hist-item" data-sidx="'+i+'"><div class="file-hist-name">'+modeLabel+s.fileName+'</div><div class="file-hist-meta">'+dateStr+' · '+s.monthCount+' months · '+s.metricCount+' metrics'+(loc?' · '+loc:'')+'</div></div>';
+    return '<div class="file-hist-item" data-sidx="'+globalIdx+'"><div class="file-hist-name">'+modeLabel+s.fileName+'</div><div class="file-hist-meta">'+dateStr+' · '+s.monthCount+' months · '+s.metricCount+' metrics'+(loc?' · '+loc:'')+'</div></div>';
   }).join("");
 }
 
@@ -1240,35 +1242,47 @@ document.getElementById("backBtn").addEventListener("click",()=>{resetAll();show
 document.getElementById("uploadBtn").addEventListener("click",()=>document.getElementById("fileInput").click());
 document.getElementById("fileInput").addEventListener("change",async function(e){const f=e.target.files?.[0];if(!f)return;try{DATA=await readFile(f);document.getElementById("uploadBtn").textContent="✓ "+f.name;window._currentFileName=f.name;populatePeriod("periodFrom","periodTo",DATA.months);runAnalysis();}catch(ex){document.getElementById("errorBox").textContent=ex.message;document.getElementById("errorBox").style.display="";}});
 
-// File history dropdown (works for both modes)
+// Analyzer file history dropdown — shows only analyzer sessions
 document.getElementById("fileHistBtn").addEventListener("click",function(e){
   e.stopPropagation();closeAllDropdowns();
   const dd=document.getElementById("fileHistDropdown");
-  renderFileHistory();
+  renderFileHistory("fileHistDropdown","analyzer");
   dd.classList.toggle("hidden");
   if(!dd.classList.contains("hidden")){
     const rect=this.getBoundingClientRect();
     dd.style.top=(rect.bottom+4)+"px";dd.style.left=rect.left+"px";
   }
 });
-document.getElementById("compFileHistBtn").addEventListener("click",function(e){
-  e.stopPropagation();closeAllDropdowns();
-  const dd=document.getElementById("fileHistDropdown");
-  renderFileHistory();
-  dd.classList.toggle("hidden");
-  // Position near the comparison button
-  dd.style.position="fixed";
-  const rect=this.getBoundingClientRect();
-  dd.style.top=(rect.bottom+4)+"px";dd.style.left=rect.left+"px";
-});
 document.getElementById("fileHistDropdown").addEventListener("click",function(e){
   const item=e.target.closest(".file-hist-item");if(!item)return;
   const idx=parseInt(item.dataset.sidx);
   const sessions=loadSessions();
   const session=sessions[idx];if(!session)return;
-  document.getElementById("fileHistDropdown").classList.add("hidden");
+  this.classList.add("hidden");
   restoreSession(session);
-  showMode(session.mode==='comparison'?'comp':'analyzer');
+  showMode("analyzer");
+});
+
+// Comparison file history dropdown — shows only comparison sessions
+document.getElementById("compFileHistBtn").addEventListener("click",function(e){
+  e.stopPropagation();closeAllDropdowns();
+  const dd=document.getElementById("compFileHistDropdown");
+  renderFileHistory("compFileHistDropdown","comparison");
+  dd.classList.toggle("hidden");
+  if(!dd.classList.contains("hidden")){
+    const rect=this.getBoundingClientRect();
+    dd.style.position="fixed";
+    dd.style.top=(rect.bottom+4)+"px";dd.style.left=rect.left+"px";
+  }
+});
+document.getElementById("compFileHistDropdown").addEventListener("click",function(e){
+  const item=e.target.closest(".file-hist-item");if(!item)return;
+  const idx=parseInt(item.dataset.sidx);
+  const sessions=loadSessions();
+  const session=sessions[idx];if(!session)return;
+  this.classList.add("hidden");
+  restoreSession(session);
+  showMode("comp");
 });
 // Save session buttons
 document.getElementById("saveSessionBtn").addEventListener("click",function(){
@@ -1379,20 +1393,20 @@ function getAIContext(){
 }
 
 async function runReasonEngineAsync(months){
+  if(!RESULTS||!RESULTS.length)return;
   const stateVal=document.getElementById("aiState")?.value||"";
   const cityVal=document.getElementById("aiCity")?.value||"";
-  if(!stateVal||!cityVal||!RESULTS)return;
-  const stateAbbr=Object.entries(Context.STATE_ABBR).find(([k])=>k===stateVal)?.[1]||"";
-  if(!stateAbbr)return;
+  const stateAbbr=stateVal?(Object.entries(Context.STATE_ABBR).find(([k])=>k===stateVal)||[])[1]||"":"";
   contextStatus="loading";updateContextIndicator();
-  const assetInfo={type:document.getElementById("aiPropType")?.value||"Multifamily Residential",location:cityVal+", "+stateVal,city:cityVal,state:stateVal};
+  const assetInfo={type:document.getElementById("aiPropType")?.value||"Multifamily Residential",location:cityVal&&stateVal?cityVal+", "+stateVal:"",city:cityVal,state:stateVal};
+  let dataContext={};
+  if(stateAbbr&&cityVal){
+    try{dataContext=await Context.fetchDataContext(stateAbbr,cityVal,months);window._dataContext=dataContext;}catch(e){console.warn("Context fetch failed:",e);}
+  }
   try{
-    const dataContext=await Context.fetchDataContext(stateAbbr,cityVal,months);
-    window._dataContext=dataContext;
     reasonResults=Adapter.runReasonEngine(RESULTS,months,assetInfo,dataContext);
     window.reasonResults=reasonResults;
     contextStatus="done";
-    // Auto-save session
     saveCurrentSession(window._currentFileName||"analysis");
   }catch(err){console.error("Reason engine error:",err);contextStatus="error";}
   updateContextIndicator();
