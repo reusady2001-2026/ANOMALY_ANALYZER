@@ -1322,15 +1322,19 @@ async function runCompReasonEngines(aligned){
     if(!p.results)continue;
     const st=document.getElementById(`compState_${p.id}`)?.value||"";
     const ct=document.getElementById(`compCity_${p.id}`)?.value||"";
-    const stAbbr=st?Object.entries(Context.STATE_ABBR).find(([k])=>k===st)?.[1]||"":"";
-    if(!stAbbr||!ct)continue;
-    const assetInfo={type:document.getElementById(`compType_${p.id}`)?.value||"Multifamily Residential",location:ct+", "+st,city:ct,state:st};
+    const stAbbr=st?(Object.entries(Context.STATE_ABBR).find(([k])=>k===st)||[])[1]||"":"";
+    const assetInfo={type:document.getElementById(`compType_${p.id}`)?.value||"Multifamily Residential",location:ct&&st?ct+", "+st:"",city:ct,state:st};
     const months=p.sliced?.months||p.alignedData?.months||[];
+    let dataContext={};
+    // Try to fetch API data, but don't block if it fails
+    if(stAbbr&&ct){
+      try{dataContext=await Context.fetchDataContext(stAbbr,ct,months);}catch(e){console.warn("Context fetch failed for",p.label,e);}
+    }
+    // Always run rule engine — even with empty dataContext, Tier 2-4 rules still work
     try{
-      const dataContext=await Context.fetchDataContext(stAbbr,ct,months);
       const rr=Adapter.runReasonEngine(p.results,months,assetInfo,dataContext);
       compReasonResults[p.id]=rr;
-    }catch(e){console.error("Comp reason engine error for",p.label,e);}
+    }catch(e){console.error("Rule engine error for",p.label,e);}
   }
   // Merge all reason results — prefix keys with property label to avoid collision
   reasonResults={lookup:{},results:[],clusters:[]};
