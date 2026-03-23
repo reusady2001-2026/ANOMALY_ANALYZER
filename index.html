@@ -354,16 +354,6 @@
     <span class="legend-item"><span style="font-size:12px;">🔄</span> Recurring</span>
   </div>
   <div id="tableWrap" class="table-wrap hidden"><table id="mainTable"></table></div>
-
-  <!-- Chat Bar -->
-  <div class="chat-bar hidden" id="chatBar">
-    <div class="chat-messages" id="chatMessages"></div>
-    <div class="chat-input-row">
-      <input type="text" id="chatInput" placeholder="Ask about the data... (Hebrew or English)" autocomplete="off">
-      <button id="chatSendBtn">➤</button>
-      <span style="font-size:9px;color:#71717a;white-space:nowrap;">(paid)</span>
-    </div>
-  </div>
 </div>
 
 <!-- Anomaly Popup -->
@@ -413,6 +403,16 @@
     <span class="legend-item"><span class="src-badge src-a">A</span> / <span class="src-badge src-b">B</span> Source</span>
   </div>
   <div id="compTableWrap" class="table-wrap hidden"><table id="compTable"></table></div>
+</div>
+
+<!-- Chat Bar (global, outside both modes) -->
+<div class="chat-bar hidden" id="chatBar">
+  <div class="chat-messages" id="chatMessages"></div>
+  <div class="chat-input-row">
+    <input type="text" id="chatInput" placeholder="Ask about the data... (Hebrew or English)" autocomplete="off">
+    <button id="chatSendBtn">➤</button>
+    <span style="font-size:9px;color:#71717a;white-space:nowrap;">(paid)</span>
+  </div>
 </div>
 
 <div id="tooltip" class="tooltip-bar"></div>
