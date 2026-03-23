@@ -164,9 +164,13 @@
   .city-search-wrap{position:relative;}
   .file-hist-dropdown{position:fixed;margin-top:4px;background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--radius-lg);width:360px;max-height:320px;overflow-y:auto;z-index:60;box-shadow:0 12px 40px rgba(0,0,0,0.6);}
   .file-hist-dropdown.hidden{display:none;}
-  .file-hist-item{padding:12px 16px;cursor:pointer;border-bottom:1px solid var(--border);transition:all 0.15s;}
+  .file-hist-item{position:relative;padding:12px 36px 12px 16px;cursor:pointer;border-bottom:1px solid var(--border);transition:all 0.15s;}
   .file-hist-item:hover{background:var(--bg-elevated);border-left:3px solid var(--accent);padding-left:13px;}
   .file-hist-item:last-child{border-bottom:none;}
+  .file-hist-del{position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:17px;line-height:1;padding:2px 5px;opacity:0;transition:opacity 0.15s;border-radius:4px;}
+  .file-hist-item:hover .file-hist-del{opacity:1;}
+  .file-hist-del:hover{color:var(--accent);background:var(--accent-glow);}
+  .file-hist-sync{font-size:11px;color:var(--text-muted);padding:5px 12px;border-bottom:1px solid var(--border);text-align:center;letter-spacing:0.03em;}
   .file-hist-name{font-family:var(--font-display);font-size:11px;font-weight:700;color:var(--text-primary);margin-bottom:3px;}
   .file-hist-meta{font-size:9px;color:var(--text-muted);font-family:var(--font-display);}
   .file-hist-empty{padding:16px;font-size:11px;color:var(--text-muted);text-align:center;font-style:italic;}
@@ -1104,10 +1108,37 @@ function saveSessions(sessions){
   }
 }
 
+// ── CLOUD SESSION SYNC (Supabase via /api/sessions) ───
+let cloudSyncStatus='idle';
+
+async function pushSessionToCloud(session){
+  try{await fetch('/api/sessions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(session)});}
+  catch(e){console.warn('Cloud push failed:',e);}
+}
+async function deleteSessionFromCloud(id){
+  if(!id)return;
+  try{await fetch('/api/sessions?id='+encodeURIComponent(id),{method:'DELETE'});}
+  catch(e){console.warn('Cloud delete failed:',e);}
+}
+async function syncFromCloud(){
+  cloudSyncStatus='syncing';
+  try{
+    const r=await fetch('/api/sessions');
+    if(!r.ok){cloudSyncStatus='error';return;}
+    const cloud=await r.json();
+    if(Array.isArray(cloud)&&cloud.length){
+      localStorage.setItem(SESSION_KEY,JSON.stringify(cloud.slice(0,MAX_SESSIONS)));
+    }
+    cloudSyncStatus='done';
+  }catch(e){console.warn('Cloud sync failed, using local cache:',e);cloudSyncStatus='error';}
+}
+
 function saveCurrentSession(fileName){
   if(!DATA||!RESULTS)return;
   const sliced=window._sliced||DATA;
+  const existing=loadSessions().find(s=>s.fileName===fileName&&s.mode==='analyzer');
   const session={
+    id:existing?.id||(typeof crypto!=='undefined'?crypto.randomUUID():Math.random().toString(36).slice(2)),
     mode:'analyzer',
     fileName,
     savedAt:Date.now(),
@@ -1123,12 +1154,15 @@ function saveCurrentSession(fileName){
   };
   let sessions=loadSessions().filter(s=>s.fileName!==fileName);
   sessions.unshift(session);saveSessions(sessions);
+  pushSessionToCloud(session);
 }
 
 function saveCompSession(){
   const aligned=window._compAligned;if(!aligned||!aligned.length)return;
   const names=aligned.map(p=>document.getElementById(`compName_${p.id}`)?.value||p.label).join(" vs ");
+  const existingComp=loadSessions().find(s=>s.fileName===names&&s.mode==='comparison');
   const session={
+    id:existingComp?.id||(typeof crypto!=='undefined'?crypto.randomUUID():Math.random().toString(36).slice(2)),
     mode:'comparison',
     fileName:names,
     savedAt:Date.now(),
@@ -1150,6 +1184,7 @@ function saveCompSession(){
   };
   let sessions=loadSessions().filter(s=>s.fileName!==names);
   sessions.unshift(session);saveSessions(sessions);
+  pushSessionToCloud(session);
 }
 
 function restoreSession(session){
@@ -1235,30 +1270,38 @@ function renderFileHistory(ddId, modeFilter){
   const dd=document.getElementById(ddId);
   const allSessions=loadSessions();
   const sessions=allSessions.filter(s=>!modeFilter||s.mode===modeFilter);
-  if(!sessions.length){dd.innerHTML='<div class="file-hist-empty">No recent '+(modeFilter==='comparison'?'comparisons':'analyses')+'</div>';return;}
-  dd.innerHTML=sessions.map((s)=>{
+  const syncNote=cloudSyncStatus==='syncing'?'<div class="file-hist-sync">⟳ Syncing from cloud...</div>':cloudSyncStatus==='done'?'<div class="file-hist-sync">☁ Cloud synced</div>':'';
+  if(!sessions.length){dd.innerHTML=syncNote+'<div class="file-hist-empty">No recent '+(modeFilter==='comparison'?'comparisons':'analyses')+'</div>';return;}
+  dd.innerHTML=syncNote+sessions.map((s)=>{
     const globalIdx=allSessions.indexOf(s);
     const d=new Date(s.savedAt);
-    const dateStr=d.toLocaleDateString()+" "+d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+    const dateStr=d.toLocaleDateString()+" "+d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
     const loc=s.mode==='comparison'?(s.properties||[]).map(p=>[p.city,p.state].filter(Boolean).join(", ")).filter(Boolean).join(" / "):[s.city,s.state].filter(Boolean).join(", ");
     const modeLabel=s.mode==='comparison'?'⚖️ ':'📊 ';
-    return '<div class="file-hist-item" data-sidx="'+globalIdx+'"><div class="file-hist-name">'+modeLabel+s.fileName+'</div><div class="file-hist-meta">'+dateStr+' · '+s.monthCount+' months · '+s.metricCount+' metrics'+(loc?' · '+loc:'')+'</div></div>';
+    return '<div class="file-hist-item" data-sidx="'+globalIdx+'" data-cloud-id="'+(s.id||'')+'"><div class="file-hist-name">'+modeLabel+s.fileName+'</div><div class="file-hist-meta">'+dateStr+' · '+s.monthCount+' months · '+s.metricCount+' metrics'+(loc?' · '+loc:'')+'</div><button class="file-hist-del" data-sidx="'+globalIdx+'" data-cloud-id="'+(s.id||'')+'" title="Delete session">\xd7</button></div>';
   }).join("");
-  // Attach click directly on each item
   dd.querySelectorAll(".file-hist-item").forEach(item=>{
     item.addEventListener("click",function(e){
+      if(e.target.classList.contains("file-hist-del"))return;
       e.stopPropagation();
       const idx=parseInt(this.dataset.sidx);
       const session=allSessions[idx];
       if(!session)return;
       dd.classList.add("hidden");
-      if(session.mode==='comparison'){
-        showMode("comp");
-        restoreCompSession(session);
-      }else{
-        restoreSession(session);
-        showMode("analyzer");
-      }
+      if(session.mode==='comparison'){showMode("comp");restoreCompSession(session);}
+      else{restoreSession(session);showMode("analyzer");}
+    });
+  });
+  dd.querySelectorAll(".file-hist-del").forEach(btn=>{
+    btn.addEventListener("click",function(e){
+      e.stopPropagation();
+      const idx=parseInt(this.dataset.sidx);
+      const cloudId=this.dataset.cloudId;
+      let all=loadSessions();
+      all.splice(idx,1);
+      saveSessions(all);
+      if(cloudId)deleteSessionFromCloud(cloudId);
+      renderFileHistory(ddId,modeFilter);
     });
   });
 }
@@ -1331,6 +1374,9 @@ document.getElementById("exportBtn").addEventListener("click",function(e){e.stop
 document.getElementById("compExportBtn").addEventListener("click",function(e){e.stopPropagation();closeAllDropdowns();document.getElementById("compExportMenu").classList.toggle("open");});
 document.querySelectorAll("[data-exp]").forEach(b=>b.addEventListener("click",function(){doAnalyzerExport(this.dataset.exp);closeAllDropdowns();}));
 document.querySelectorAll("[data-cexp]").forEach(b=>b.addEventListener("click",function(){doCompExport(this.dataset.cexp);closeAllDropdowns();}));
+
+// Sync sessions from cloud on page load
+syncFromCloud();
 
 // ============ REASON ENGINE + AI CHAT ============
 let chatHistory=[];
