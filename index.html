@@ -1386,11 +1386,19 @@ async function runCompReasonEngines(aligned){
 function buildDataContext(){
   if(cachedContext)return cachedContext;
   if(!RESULTS)return"";
-  const sliced=window._sliced||DATA;
+  // In comparison mode, use aligned months. In analyzer mode, use sliced.
+  const aligned=window._compAligned;
+  let months;
+  if(aligned&&aligned.length){
+    months=aligned[0].sliced?aligned[0].sliced.months:aligned[0].alignedData?.months||[];
+  }else{
+    const sliced=window._sliced||DATA;
+    months=sliced?sliced.months:[];
+  }
   const lines=[];
   RESULTS.forEach(met=>{
     const vals=met.res.map((r,i)=>{
-      let info=`${sliced.months[i]||"?"}:${Math.round(r.v)}`;
+      let info=`${months[i]||"?"}:${Math.round(r.v)}`;
       if(r.st==="anom")info+=`[ANOMALY z=${r.z?.toFixed(2)} ${r.zm} ${r.at} ${r.mat?"MATERIAL":""}]`;
       if(r.st==="seas")info+=`[SEASONAL]`;if(r.st==="skip")info+=`[SKIP]`;if(r.st==="pre")info+=`[PRE-OPEN]`;
       return info;
