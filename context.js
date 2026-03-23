@@ -112,11 +112,36 @@ const Context = (() => {
     return { startDate: toISO(lookback), endDate: toISO(endDate) };
   }
  
-  // ── FETCH HELPER ──────────────────────────────────────
+  // ── FETCH HELPER (routes all external calls through server-side proxy) ──
   function fetchWithTimeout(url, ms, opts) {
     const ctrl = new AbortController();
     const tid  = setTimeout(() => ctrl.abort(), ms || 12000);
-    return fetch(url, { signal: ctrl.signal, ...opts }).finally(() => clearTimeout(tid));
+
+    // Build proxy URL
+    let proxyUrl = '/api/context-proxy?url=' + encodeURIComponent(url);
+
+    const proxyOpts = { signal: ctrl.signal, method: opts?.method || 'GET' };
+
+    if (opts?.method === 'POST') {
+      // For POST: merge any custom headers into body as _proxyHeaders
+      const customHeaders = { ...opts.headers };
+      delete customHeaders['Content-Type'];
+      let bodyObj = {};
+      try { bodyObj = JSON.parse(opts.body || '{}'); } catch {}
+      if (Object.keys(customHeaders).length) bodyObj._proxyHeaders = customHeaders;
+      proxyOpts.headers = { 'Content-Type': 'application/json' };
+      proxyOpts.body = JSON.stringify(bodyObj);
+    } else if (opts?.headers) {
+      // For GET: pass custom headers as h query param
+      const customHeaders = { ...opts.headers };
+      delete customHeaders['Content-Type'];
+      if (Object.keys(customHeaders).length) {
+        proxyUrl += '&h=' + encodeURIComponent(JSON.stringify(customHeaders));
+      }
+      proxyOpts.headers = { 'Content-Type': 'application/json' };
+    }
+
+    return fetch(proxyUrl, proxyOpts).finally(() => clearTimeout(tid));
   }
  
   // ════════════════════════════════════════════════════════
