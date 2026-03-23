@@ -5,7 +5,7 @@ module.exports = async function handler(req, res) {
   const API_KEY = process.env.ANOMALY_ANALYZER;
   if (!API_KEY) return res.status(500).json({ error: "API key not configured" });
  
-  const { mode, context, question, history, anomaly, propertyName, propertyType, city, state } = req.body;
+  const { mode, context, question, history, anomaly, anomalies, propertyName, propertyType, city, state } = req.body;
  
   const loc = (city || "") + (city && state ? ", " : "") + (state || "");
  
@@ -32,15 +32,36 @@ RULES:
  
   let system, userMsg;
  
-  if (mode === "explain") {
+  if (mode === "batch") {
     system = base + `
  
-TASK: Explain one specific anomaly. Consider:
-1. What happened in ${loc} during the anomaly month? Climate, regulations, market events?
+TASK: Explain ALL anomalies in one response. For each anomaly, consider:
+1. What happened in ${loc} during that month? Climate, regulations, market?
 2. Seasonal patterns for this metric in this location?
 3. Operational event? Lease, vendor, maintenance?
 4. Regulatory? Tax, utility rate, compliance?
-5. Connected to other anomalies in the dataset?
+5. Connected to other anomalies?
+ 
+Respond ONLY in JSON — an object with an "explanations" array. Each element must have the exact metric name and month from the input, plus explanation fields:
+{
+  "explanations": [
+    {
+      "metric": "exact metric name from input",
+      "month": "exact month from input",
+      "primaryReason": {"category": "Seasonal|Operational|Regulatory|Market|Data|Asset-Specific", "explanation": "detailed", "confidence": "high|medium|low"},
+      "alternatives": [{"category": "cat", "explanation": "exp"}, {"category": "cat", "explanation": "exp"}, {"category": "cat", "explanation": "exp"}],
+      "scope": "asset-specific|market-wide|data-related",
+      "relatedAnomalies": "connections to other anomalies in this dataset",
+      "recommendation": "what to investigate",
+      "localContext": "what was happening in ${loc} during this period"
+    }
+  ]
+}`;
+    userMsg = `Dataset:\n${context}\n\nExplain ALL these anomalies:\n${JSON.stringify(anomalies)}`;
+  } else if (mode === "explain") {
+    system = base + `
+ 
+TASK: Explain one specific anomaly. Consider location, season, operations, regulation, market.
  
 Respond ONLY in JSON:
 {
@@ -55,7 +76,7 @@ Respond ONLY in JSON:
   } else {
     system = base + `
  
-TASK: Answer the user's question about the data. You can calculate, compare, explain detection logic, identify patterns, and bring local market context for ${loc}. Be precise and data-driven.`;
+TASK: Answer the user's question about the data. Calculate, compare, explain detection logic, identify patterns, bring local market context for ${loc}. Be precise and data-driven.`;
     userMsg = `Dataset:\n${context}\n\nQuestion: ${question}`;
   }
  
@@ -77,11 +98,10 @@ TASK: Answer the user's question about the data. You can calculate, compare, exp
     const data = await r.json();
     const text = data.content?.[0]?.text || "";
     let result;
-    if (mode === "explain") {
+    if (mode === "batch" || mode === "explain") {
       try { const m = text.match(/\{[\s\S]*\}/); result = m ? JSON.parse(m[0]) : { raw: text }; }
       catch (e) { result = { raw: text }; }
     } else { result = { answer: text }; }
     return res.status(200).json(result);
   } catch (err) { return res.status(500).json({ error: err.message }); }
-}
- 
+};
