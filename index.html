@@ -1179,16 +1179,18 @@ function restoreSession(session){
 }
 
 function restoreCompSession(session){
+  console.log("[RestoreComp] Starting, properties:",session.properties?.length);
   chatHistory=session.chatHistory||[];
   cachedContext=null;
   reasonResults=session.reasonResults||null;
   window.reasonResults=reasonResults;
   compReasonResults=session.compReasonResults||{};
-  contextStatus=reasonResults?"done":"idle";
+  contextStatus=reasonResults&&reasonResults.lookup&&Object.keys(reasonResults.lookup).length>0?"done":"idle";
   // Rebuild comparison properties
   document.getElementById("compProperties").innerHTML="";
   compProperties=[];compPropertyCounter=0;
   session.properties.forEach((sp,i)=>{
+    console.log("[RestoreComp] Adding property",i,sp.label,sp.name,"results:",sp.results?.length);
     const prop=addCompProperty();
     prop.data=sp.data;prop.results=sp.results;prop.sliced=sp.sliced;prop.alignedData=sp.alignedData;
     const card=document.getElementById(`compProp_${prop.id}`);
@@ -1198,23 +1200,30 @@ function restoreCompSession(session){
       const ctEl=document.getElementById(`compCity_${prop.id}`);if(ctEl)ctEl.value=sp.city;
       const ppEl=document.getElementById(`compPP_${prop.id}`);if(ppEl)ppEl.value=sp.price?sp.price.toLocaleString():"0";
       const tpEl=document.getElementById(`compType_${prop.id}`);if(tpEl)tpEl.value=sp.propType;
-      const btn=card.querySelector(".comp-prop-fields .btn");if(btn)btn.textContent="✓ restored";
-    }
+      const btn=card.querySelector(".comp-prop-fields .btn");if(btn)btn.textContent="✓ "+sp.name;
+    }else{console.error("[RestoreComp] Card not found for prop",prop.id);}
   });
   // Rebuild aligned structure
-  window._compAligned=session.properties.map((sp,i)=>({
-    ...compProperties[i],data:sp.data,results:sp.results,sliced:sp.sliced,alignedData:sp.alignedData
-  }));
+  window._compAligned=session.properties.map((sp,i)=>{
+    const cp=compProperties[i];
+    if(!cp){console.error("[RestoreComp] compProperties["+i+"] missing");return null;}
+    return{...cp,data:sp.data,results:sp.results,sliced:sp.sliced,alignedData:sp.alignedData};
+  }).filter(Boolean);
   window._compSkip=session.compSkip;
+  console.log("[RestoreComp] Aligned:",window._compAligned.length,"properties, skip:",window._compSkip);
   // Build combined RESULTS for chat context
   const allRes=[];session.properties.forEach(sp=>{if(sp.results)allRes.push(...sp.results);});
   RESULTS=allRes;cachedContext=buildDataContext();
+  console.log("[RestoreComp] Calling renderComp, RESULTS:",RESULTS.length);
   renderComp();
   document.getElementById("chatBar").classList.remove("hidden");
   // If no reasonResults saved, re-run the engine
   if(!reasonResults||!reasonResults.lookup||Object.keys(reasonResults.lookup).length===0){
+    console.log("[RestoreComp] No reasonResults, re-running engine");
     const aligned=window._compAligned;
     if(aligned&&aligned.length)runCompReasonEngines(aligned);
+  }else{
+    console.log("[RestoreComp] reasonResults loaded, keys:",Object.keys(reasonResults.lookup).length);
   }
   const msgs=document.getElementById("chatMessages");
   if(msgs&&chatHistory.length){msgs.innerHTML="";chatHistory.forEach(m=>{msgs.innerHTML+='<div class="chat-msg '+(m.role==="user"?"user":"ai")+'">'+m.content.replace(/\n/g,"<br>")+'</div>';});}
@@ -1281,8 +1290,8 @@ document.getElementById("compFileHistDropdown").addEventListener("click",functio
   const sessions=loadSessions();
   const session=sessions[idx];if(!session)return;
   this.classList.add("hidden");
-  restoreSession(session);
   showMode("comp");
+  restoreCompSession(session);
 });
 // Save session buttons
 document.getElementById("saveSessionBtn").addEventListener("click",function(){
@@ -1331,30 +1340,34 @@ let contextStatus="idle";
 
 // Reason engine for comparison mode — runs for each property
 async function runCompReasonEngines(aligned){
+  console.log("[CompReasons] CALLED with",aligned.length,"properties");
   contextStatus="loading";updateContextIndicator();
   for(const p of aligned){
-    if(!p.results)continue;
+    if(!p.results){console.log("[CompReasons] Skipping",p.label,"— no results");continue;}
+    console.log("[CompReasons] Processing",p.label,"with",p.results.length,"metrics");
     const st=document.getElementById(`compState_${p.id}`)?.value||"";
     const ct=document.getElementById(`compCity_${p.id}`)?.value||"";
+    console.log("[CompReasons]",p.label,"state:",st,"city:",ct,"id:",p.id);
     const stAbbr=st?(Object.entries(Context.STATE_ABBR).find(([k])=>k===st)||[])[1]||"":"";
     const assetInfo={type:document.getElementById(`compType_${p.id}`)?.value||"Multifamily Residential",location:ct&&st?ct+", "+st:"",city:ct,state:st};
     const months=p.sliced?.months||p.alignedData?.months||[];
+    console.log("[CompReasons]",p.label,"stateAbbr:",stAbbr,"months:",months.length);
     let dataContext={};
-    // Try to fetch API data, but don't block if it fails
     if(stAbbr&&ct){
-      try{dataContext=await Context.fetchDataContext(stAbbr,ct,months);}catch(e){console.warn("Context fetch failed for",p.label,e);}
-    }
-    // Always run rule engine — even with empty dataContext, Tier 2-4 rules still work
+      try{dataContext=await Context.fetchDataContext(stAbbr,ct,months);console.log("[CompReasons]",p.label,"context fetched OK");}catch(e){console.warn("[CompReasons] Context fetch failed for",p.label,e);}
+    }else{console.log("[CompReasons]",p.label,"skipping API — no state/city");}
     try{
       const rr=Adapter.runReasonEngine(p.results,months,assetInfo,dataContext);
       compReasonResults[p.id]=rr;
-    }catch(e){console.error("Rule engine error for",p.label,e);}
+      console.log("[CompReasons]",p.label,"rules done, lookup keys:",Object.keys(rr.lookup||{}).length);
+    }catch(e){console.error("[CompReasons] Rule engine CRASHED for",p.label,e);}
   }
   // Merge all reason results — prefix keys with property label to avoid collision
   reasonResults={lookup:{},results:[],clusters:[]};
   aligned.forEach(p=>{
     const rr=compReasonResults[p.id];
-    if(!rr)return;
+    if(!rr){console.log("[CompReasons] No results for",p.label);return;}
+    console.log("[CompReasons] Merging",p.label,"lookup:",Object.keys(rr.lookup||{}).length);
     if(rr.lookup){
       Object.entries(rr.lookup).forEach(([key,val])=>{
         reasonResults.lookup[p.label+"|||"+key]=val;
@@ -1365,6 +1378,7 @@ async function runCompReasonEngines(aligned){
     if(rr.clusters)reasonResults.clusters.push(...rr.clusters);
   });
   window.reasonResults=reasonResults;
+  console.log("[CompReasons] DONE. Total lookup keys:",Object.keys(reasonResults.lookup).length);
   contextStatus="done";updateContextIndicator();
   saveCompSession();
 }
