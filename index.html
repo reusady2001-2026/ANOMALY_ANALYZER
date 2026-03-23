@@ -1112,8 +1112,10 @@ function saveSessions(sessions){
 let cloudSyncStatus='idle';
 
 async function pushSessionToCloud(session){
-  try{await fetch('/api/sessions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(session)});}
-  catch(e){console.warn('Cloud push failed:',e);}
+  try{
+    const r=await fetch('/api/sessions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(session)});
+    if(!r.ok){const e=await r.text();console.error('Cloud push error',r.status,e);cloudSyncStatus='error';}
+  }catch(e){console.warn('Cloud push failed:',e);cloudSyncStatus='error';}
 }
 async function deleteSessionFromCloud(id){
   if(!id)return;
@@ -1127,7 +1129,8 @@ async function syncFromCloud(){
     if(!r.ok){cloudSyncStatus='error';return;}
     const cloud=await r.json();
     if(Array.isArray(cloud)&&cloud.length){
-      localStorage.setItem(SESSION_KEY,JSON.stringify(cloud.slice(0,MAX_SESSIONS)));
+      try{localStorage.setItem(SESSION_KEY,JSON.stringify(cloud.slice(0,MAX_SESSIONS)));}
+      catch(e){console.warn('localStorage full, sessions available from cloud only');}
     }
     cloudSyncStatus='done';
   }catch(e){console.warn('Cloud sync failed, using local cache:',e);cloudSyncStatus='error';}
