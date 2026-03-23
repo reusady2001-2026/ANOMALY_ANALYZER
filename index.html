@@ -340,6 +340,7 @@
       <div class="ex-item" data-exp="html-filtered"><span class="ex-icon">🌐</span><div>Current View<div class="ex-desc">Filtered data as shown</div></div></div>
       <div class="ex-item" data-exp="html-full"><span class="ex-icon">📄</span><div>Full Report<div class="ex-desc">All metrics, no filters</div></div></div>
     </div></div></div>
+    <div class="ctrl-group"><label>Session</label><button class="btn" id="saveSessionBtn">💾 Save</button></div>
   </div>
   <div id="errorBox" class="error-box"></div>
   <div id="statsRow" class="stats hidden"></div>
@@ -398,6 +399,7 @@
       <div class="ex-item" data-cexp="html-filtered"><span class="ex-icon">🌐</span><div>Current View<div class="ex-desc">Filtered data as shown</div></div></div>
       <div class="ex-item" data-cexp="html-full"><span class="ex-icon">📄</span><div>Full Report<div class="ex-desc">All metrics, no filters</div></div></div>
     </div></div></div>
+    <div class="ctrl-group"><label>Session</label><button class="btn" id="compSaveSessionBtn">💾 Save</button></div>
   </div>
   <div id="compError" class="error-box"></div>
   <div id="compStats" class="comp-stats hidden"></div>
@@ -678,6 +680,8 @@ function runAnalysis(){if(!DATA)return;const pp=getP("ppInput");
   window._sliced=sliced;window._slicedSkip=sk;
   cachedContext=null;cachedContext=buildDataContext();
   renderAnalyzer();
+  // Save session immediately (before reason engine)
+  saveCurrentSession(window._currentFileName||"analysis");
   // Run reason engine in background
   runReasonEngineAsync(sliced.months);
 }
@@ -1030,7 +1034,23 @@ const SESSION_KEY='oaas_sessions';
 const MAX_SESSIONS=5;
 
 function loadSessions(){try{return JSON.parse(localStorage.getItem(SESSION_KEY)||'[]');}catch{return[];}}
-function saveSessions(sessions){try{localStorage.setItem(SESSION_KEY,JSON.stringify(sessions.slice(0,MAX_SESSIONS)));}catch(e){console.warn('Session save failed:',e);}}
+function saveSessions(sessions){
+  const toSave=sessions.slice(0,MAX_SESSIONS);
+  try{
+    localStorage.setItem(SESSION_KEY,JSON.stringify(toSave));
+  }catch(e){
+    console.warn('Session save failed (quota), trying without dataContext:',e);
+    // Strip heavy data and retry
+    toSave.forEach(s=>{s.dataContext=null;});
+    try{
+      localStorage.setItem(SESSION_KEY,JSON.stringify(toSave));
+    }catch(e2){
+      console.warn('Still too large, keeping only metadata:',e2);
+      const lite=toSave.map(s=>({mode:s.mode,fileName:s.fileName,savedAt:s.savedAt,monthCount:s.monthCount,metricCount:s.metricCount,state:s.state,city:s.city,price:s.price,propType:s.propType,data:s.data,results:s.results,sliced:s.sliced,slicedSkip:s.slicedSkip,chatHistory:s.chatHistory||[]}));
+      try{localStorage.setItem(SESSION_KEY,JSON.stringify(lite));}catch(e3){console.error('Session save completely failed:',e3);}
+    }
+  }
+}
 
 function saveCurrentSession(fileName){
   if(!DATA||!RESULTS)return;
@@ -1184,6 +1204,19 @@ document.getElementById("fileHistDropdown").addEventListener("click",function(e)
   document.getElementById("fileHistDropdown").classList.add("hidden");
   restoreSession(session);
   showMode(session.mode==='comparison'?'comp':'analyzer');
+});
+// Save session buttons
+document.getElementById("saveSessionBtn").addEventListener("click",function(){
+  if(!RESULTS){alert("Run analysis first");return;}
+  saveCurrentSession(window._currentFileName||"analysis");
+  this.textContent="✓ Saved!";this.style.background="var(--green)";this.style.color="#000";this.style.borderColor="var(--green)";
+  setTimeout(()=>{this.textContent="💾 Save";this.style.background="";this.style.color="";this.style.borderColor="";},2000);
+});
+document.getElementById("compSaveSessionBtn").addEventListener("click",function(){
+  if(!window._compAligned){alert("Run comparison first");return;}
+  saveCompSession();
+  this.textContent="✓ Saved!";this.style.background="var(--green)";this.style.color="#000";this.style.borderColor="var(--green)";
+  setTimeout(()=>{this.textContent="💾 Save";this.style.background="";this.style.color="";this.style.borderColor="";},2000);
 });
 document.getElementById("rerunBtn").addEventListener("click",runAnalysis);
 document.getElementById("periodFrom").addEventListener("change",runAnalysis);
