@@ -128,6 +128,18 @@
   .hidden{display:none!important;}
   #fileInput{display:none;}
   .city-search-wrap{position:relative;}
+  .file-hist-dropdown{position:absolute;top:100%;left:0;margin-top:4px;background:#1e1e28;border:1px solid #2a2a38;border-radius:8px;width:340px;max-height:300px;overflow-y:auto;z-index:60;box-shadow:0 8px 24px rgba(0,0,0,0.5);}
+  .file-hist-dropdown.hidden{display:none;}
+  .file-hist-item{padding:10px 14px;cursor:pointer;border-bottom:1px solid #242430;transition:background 0.15s;}
+  .file-hist-item:hover{background:#2a2a38;}
+  .file-hist-item:last-child{border-bottom:none;}
+  .file-hist-name{font-size:12px;font-weight:700;color:#eeeef4;margin-bottom:3px;}
+  .file-hist-meta{font-size:9px;color:#71717a;}
+  .file-hist-empty{padding:14px;font-size:11px;color:#52525b;text-align:center;font-style:italic;}
+  body.light .file-hist-dropdown{background:#faf8f5;border-color:#d5d0ca;}
+  body.light .file-hist-item:hover{background:#edeae6;}
+  body.light .file-hist-name{color:#2c2c34;}
+  body.light .file-hist-meta{color:#888;}
   .city-dropdown{position:absolute;top:100%;left:0;margin-top:4px;background:#1e1e28;border:1px solid #3f3f46;border-radius:6px;width:240px;max-height:200px;overflow-y:auto;z-index:50;box-shadow:0 8px 24px rgba(0,0,0,0.4);}
   .city-dropdown .city-item{padding:7px 12px;cursor:pointer;font-size:11px;color:#d8d8e0;border-bottom:1px solid #242430;}
   .city-dropdown .city-item:hover{background:#27272a;color:#ea580c;}
@@ -285,7 +297,7 @@
 <!-- ANALYZER -->
 <div id="analyzerMode" class="hidden">
   <div class="controls">
-    <div class="ctrl-group"><label>Upload Data File</label><input type="file" id="fileInput" accept=".xlsx,.xls,.csv"><button class="btn" id="uploadBtn">Choose .xlsx / .csv</button></div>
+    <div class="ctrl-group"><label>Upload Data File</label><div style="display:flex;gap:6px;"><input type="file" id="fileInput" accept=".xlsx,.xls,.csv"><button class="btn" id="uploadBtn">Choose .xlsx / .csv</button><button class="btn" id="fileHistBtn" title="Recent files" style="padding:7px 10px;">📂 ▾</button></div><div class="file-hist-dropdown hidden" id="fileHistDropdown"></div></div>
     <div class="ctrl-group"><label>Purchase Price ($) *</label><div style="display:flex;gap:6px;"><div class="pp-wrap"><input type="text" id="ppInput" value="0"><button class="pp-hist-btn" data-pp-target="ppInput" title="Price history">▾</button><div class="pp-dropdown" id="ppInput_dd"></div></div><button class="btn btn-primary hidden" id="rerunBtn">Re-Analyze</button></div><div class="threshold-info" id="thresholdInfo">10bps: $0/mo</div></div>
     <div class="ctrl-group"><label>State *</label><select id="aiState" style="background:#1e1e28;border:1px solid #3f3f46;color:#d8d8e0;padding:7px 8px;border-radius:5px;font-size:11px;font-family:inherit;width:160px;"><option value="">Select state...</option><option>Alabama</option><option>Alaska</option><option>Arizona</option><option>Arkansas</option><option>California</option><option>Colorado</option><option>Connecticut</option><option>Delaware</option><option>Florida</option><option>Georgia</option><option>Hawaii</option><option>Idaho</option><option>Illinois</option><option>Indiana</option><option>Iowa</option><option>Kansas</option><option>Kentucky</option><option>Louisiana</option><option>Maine</option><option>Maryland</option><option>Massachusetts</option><option>Michigan</option><option>Minnesota</option><option>Mississippi</option><option>Missouri</option><option>Montana</option><option>Nebraska</option><option>Nevada</option><option>New Hampshire</option><option>New Jersey</option><option>New Mexico</option><option>New York</option><option>North Carolina</option><option>North Dakota</option><option>Ohio</option><option>Oklahoma</option><option>Oregon</option><option>Pennsylvania</option><option>Rhode Island</option><option>South Carolina</option><option>South Dakota</option><option>Tennessee</option><option>Texas</option><option>Utah</option><option>Vermont</option><option>Virginia</option><option>Washington</option><option>West Virginia</option><option>Wisconsin</option><option>Wyoming</option><option>Washington DC</option></select></div>
     <div class="ctrl-group"><label>City *</label><div class="city-search-wrap"><input type="text" id="aiCity" placeholder="Type to search..." autocomplete="off" style="background:#1e1e28;border:1px solid #3f3f46;color:#d8d8e0;padding:7px 10px;border-radius:5px;font-size:11px;font-family:inherit;width:200px;"><div class="city-dropdown hidden" id="cityDropdown"></div></div></div>
@@ -345,6 +357,7 @@
   <div id="compProperties"></div>
   <div class="controls" style="border-top:1px solid #27272a;">
     <div class="ctrl-group"><label>&nbsp;</label><button class="btn" id="addPropertyBtn" style="background:#6d28d9;border-color:#6d28d9;color:#fff;">+ Add Property</button></div>
+    <div class="ctrl-group"><label>&nbsp;</label><button class="btn" id="compFileHistBtn" title="Recent sessions">📂 ▾</button></div>
     <div class="ctrl-group"><label>&nbsp;</label><button class="btn btn-primary hidden" id="compRunBtn">Compare</button></div>
   </div>
   <div class="controls hidden" id="compFilters">
@@ -384,7 +397,7 @@ const SKIP=2,LIN=0.04,FLOOR_C=1.0,STOL=0.10;
 function loadPriceHistory(){try{return JSON.parse(localStorage.getItem("ppHist")||"[]");}catch(e){return[];}}
 function savePriceToHistory(val){if(!val||val===0)return;let h=loadPriceHistory();h=h.filter(v=>v!==val);h.unshift(val);if(h.length>10)h=h.slice(0,10);localStorage.setItem("ppHist",JSON.stringify(h));refreshAllDropdowns();}
 function refreshAllDropdowns(){document.querySelectorAll(".pp-dropdown").forEach(el=>{const h=loadPriceHistory();if(!h.length){el.innerHTML=`<div class="pp-empty">No history yet</div>`;return;}el.innerHTML=h.map(v=>`<div class="pp-item" data-val="${v}">${v.toLocaleString()}</div>`).join("");});}
-function closeAllDropdowns(){document.querySelectorAll(".pp-dropdown,.export-menu,.city-dropdown").forEach(d=>{d.classList.add("hidden");d.classList.remove("open");});}
+function closeAllDropdowns(){document.querySelectorAll(".pp-dropdown,.export-menu,.city-dropdown,.file-hist-dropdown").forEach(d=>{d.classList.add("hidden");d.classList.remove("open");});}
 refreshAllDropdowns();
 
 // City API
@@ -712,6 +725,15 @@ function runComp(){
 
   window._compAligned=aligned;window._compSkip=sk;
   renderComp();
+  // Show chat bar for comparison too
+  document.getElementById("chatBar").classList.remove("hidden");
+  // Build combined context for chat
+  cachedContext=null;
+  const allResults=[];aligned.forEach(p=>{if(p.results)allResults.push(...p.results);});
+  RESULTS=allResults; // temporarily set for buildDataContext
+  cachedContext=buildDataContext();
+  // Run reason engine for each property
+  runCompReasonEngines(aligned);
 }
 
 function renderComp(){
@@ -979,12 +1001,166 @@ function doCompExport(type){
 
 function showMode(m){document.getElementById("modeSelect").classList.toggle("hidden",m!=="select");document.getElementById("analyzerMode").classList.toggle("hidden",m!=="analyzer");document.getElementById("compMode").classList.toggle("hidden",m!=="comp");document.getElementById("backBtn").classList.toggle("hidden",m==="select");document.getElementById("headerSub").textContent=m==="analyzer"?"Analyzer Mode · Single Property":m==="comp"?"Comparison Mode · Two Properties":"Multifamily P&L · Z-Score Engine · Dynamic Thresholds";}
 
+// ── SESSION PERSISTENCE (localStorage, max 5 files) ───
+const SESSION_KEY='oaas_sessions';
+const MAX_SESSIONS=5;
+
+function loadSessions(){try{return JSON.parse(localStorage.getItem(SESSION_KEY)||'[]');}catch{return[];}}
+function saveSessions(sessions){try{localStorage.setItem(SESSION_KEY,JSON.stringify(sessions.slice(0,MAX_SESSIONS)));}catch(e){console.warn('Session save failed:',e);}}
+
+function saveCurrentSession(fileName){
+  if(!DATA||!RESULTS)return;
+  const sliced=window._sliced||DATA;
+  const session={
+    mode:'analyzer',
+    fileName,
+    savedAt:Date.now(),
+    monthCount:sliced.months.length,
+    metricCount:RESULTS.length,
+    state:document.getElementById("aiState")?.value||"",
+    city:document.getElementById("aiCity")?.value||"",
+    price:getP("ppInput"),
+    propType:document.getElementById("aiPropType")?.value||"",
+    data:DATA,results:RESULTS,sliced:sliced,slicedSkip:window._slicedSkip,
+    reasonResults:window.reasonResults||null,dataContext:window._dataContext||null,
+    chatHistory:chatHistory||[],
+  };
+  let sessions=loadSessions().filter(s=>s.fileName!==fileName);
+  sessions.unshift(session);saveSessions(sessions);
+}
+
+function saveCompSession(){
+  const aligned=window._compAligned;if(!aligned||!aligned.length)return;
+  const names=aligned.map(p=>document.getElementById(`compName_${p.id}`)?.value||p.label).join(" vs ");
+  const session={
+    mode:'comparison',
+    fileName:names,
+    savedAt:Date.now(),
+    monthCount:aligned[0]?.sliced?.months?.length||0,
+    metricCount:aligned.reduce((c,p)=>c+(p.results?.length||0),0),
+    properties:aligned.map(p=>({
+      label:p.label,color:p.color,
+      name:document.getElementById(`compName_${p.id}`)?.value||p.label,
+      state:document.getElementById(`compState_${p.id}`)?.value||"",
+      city:document.getElementById(`compCity_${p.id}`)?.value||"",
+      price:getP(`compPP_${p.id}`),
+      propType:document.getElementById(`compType_${p.id}`)?.value||"",
+      data:p.data,results:p.results,sliced:p.sliced,alignedData:p.alignedData,
+    })),
+    compSkip:window._compSkip,
+    reasonResults:window.reasonResults||null,
+    compReasonResults:compReasonResults||{},
+    chatHistory:chatHistory||[],
+  };
+  let sessions=loadSessions().filter(s=>s.fileName!==names);
+  sessions.unshift(session);saveSessions(sessions);
+}
+
+function restoreSession(session){
+  if(session.mode==='comparison'){
+    restoreCompSession(session);return;
+  }
+  DATA=session.data;RESULTS=session.results;
+  window._sliced=session.sliced;window._slicedSkip=session.slicedSkip;
+  window.reasonResults=session.reasonResults;reasonResults=session.reasonResults;
+  window._dataContext=session.dataContext;chatHistory=session.chatHistory||[];
+  cachedContext=null;cachedContext=buildDataContext();
+  contextStatus=session.reasonResults?"done":"idle";
+  document.getElementById("aiState").value=session.state||"";
+  document.getElementById("aiCity").value=session.city||"";
+  document.getElementById("ppInput").value=session.price?session.price.toLocaleString():"0";
+  if(session.propType)document.getElementById("aiPropType").value=session.propType;
+  document.getElementById("uploadBtn").textContent="✓ "+session.fileName;
+  document.getElementById("thresholdInfo").textContent="10bps: $"+fmt(Math.round((session.price*0.001)/12))+"/mo";
+  populatePeriod("periodFrom","periodTo",session.sliced?.months||DATA.months);
+  renderAnalyzer();
+  const msgs=document.getElementById("chatMessages");
+  if(msgs&&chatHistory.length){msgs.innerHTML="";chatHistory.forEach(m=>{msgs.innerHTML+='<div class="chat-msg '+(m.role==="user"?"user":"ai")+'">'+m.content.replace(/\n/g,"<br>")+'</div>';});}
+}
+
+function restoreCompSession(session){
+  chatHistory=session.chatHistory||[];
+  cachedContext=null;
+  reasonResults=session.reasonResults||null;
+  window.reasonResults=reasonResults;
+  compReasonResults=session.compReasonResults||{};
+  contextStatus=reasonResults?"done":"idle";
+  // Rebuild comparison properties
+  document.getElementById("compProperties").innerHTML="";
+  compProperties=[];compPropertyCounter=0;
+  session.properties.forEach((sp,i)=>{
+    const prop=addCompProperty();
+    prop.data=sp.data;prop.results=sp.results;prop.sliced=sp.sliced;prop.alignedData=sp.alignedData;
+    const card=document.getElementById(`compProp_${prop.id}`);
+    if(card){
+      const nameEl=document.getElementById(`compName_${prop.id}`);if(nameEl)nameEl.value=sp.name;
+      const stEl=document.getElementById(`compState_${prop.id}`);if(stEl)stEl.value=sp.state;
+      const ctEl=document.getElementById(`compCity_${prop.id}`);if(ctEl)ctEl.value=sp.city;
+      const ppEl=document.getElementById(`compPP_${prop.id}`);if(ppEl)ppEl.value=sp.price?sp.price.toLocaleString():"0";
+      const tpEl=document.getElementById(`compType_${prop.id}`);if(tpEl)tpEl.value=sp.propType;
+      const btn=card.querySelector(".comp-prop-fields .btn");if(btn)btn.textContent="✓ restored";
+    }
+  });
+  // Rebuild aligned structure
+  window._compAligned=session.properties.map((sp,i)=>({
+    ...compProperties[i],data:sp.data,results:sp.results,sliced:sp.sliced,alignedData:sp.alignedData
+  }));
+  window._compSkip=session.compSkip;
+  // Build combined RESULTS for chat context
+  const allRes=[];session.properties.forEach(sp=>{if(sp.results)allRes.push(...sp.results);});
+  RESULTS=allRes;cachedContext=buildDataContext();
+  renderComp();
+  document.getElementById("chatBar").classList.remove("hidden");
+  const msgs=document.getElementById("chatMessages");
+  if(msgs&&chatHistory.length){msgs.innerHTML="";chatHistory.forEach(m=>{msgs.innerHTML+='<div class="chat-msg '+(m.role==="user"?"user":"ai")+'">'+m.content.replace(/\n/g,"<br>")+'</div>';});}
+}
+
+function renderFileHistory(){
+  const dd=document.getElementById("fileHistDropdown");
+  const sessions=loadSessions();
+  if(!sessions.length){dd.innerHTML='<div class="file-hist-empty">No recent files</div>';return;}
+  dd.innerHTML=sessions.map((s,i)=>{
+    const d=new Date(s.savedAt);
+    const dateStr=d.toLocaleDateString()+" "+d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+    const loc=[s.city,s.state].filter(Boolean).join(", ");
+    const modeLabel=s.mode==='comparison'?'⚖️ ':'📊 ';
+    return '<div class="file-hist-item" data-sidx="'+i+'"><div class="file-hist-name">'+modeLabel+s.fileName+'</div><div class="file-hist-meta">'+dateStr+' · '+s.monthCount+' months · '+s.metricCount+' metrics'+(loc?' · '+loc:'')+'</div></div>';
+  }).join("");
+}
+
 // EVENTS
 document.getElementById("modeAnalyzer").addEventListener("click",()=>showMode("analyzer"));
 document.getElementById("modeComparison").addEventListener("click",()=>showMode("comp"));
 document.getElementById("backBtn").addEventListener("click",()=>{resetAll();showMode("select");});
 document.getElementById("uploadBtn").addEventListener("click",()=>document.getElementById("fileInput").click());
-document.getElementById("fileInput").addEventListener("change",async function(e){const f=e.target.files?.[0];if(!f)return;try{DATA=await readFile(f);document.getElementById("uploadBtn").textContent="✓ "+f.name;populatePeriod("periodFrom","periodTo",DATA.months);runAnalysis();}catch(ex){document.getElementById("errorBox").textContent=ex.message;document.getElementById("errorBox").style.display="";}});
+document.getElementById("fileInput").addEventListener("change",async function(e){const f=e.target.files?.[0];if(!f)return;try{DATA=await readFile(f);document.getElementById("uploadBtn").textContent="✓ "+f.name;window._currentFileName=f.name;populatePeriod("periodFrom","periodTo",DATA.months);runAnalysis();}catch(ex){document.getElementById("errorBox").textContent=ex.message;document.getElementById("errorBox").style.display="";}});
+
+// File history dropdown (works for both modes)
+document.getElementById("fileHistBtn").addEventListener("click",function(e){
+  e.stopPropagation();closeAllDropdowns();
+  const dd=document.getElementById("fileHistDropdown");
+  renderFileHistory();
+  dd.classList.toggle("hidden");
+});
+document.getElementById("compFileHistBtn").addEventListener("click",function(e){
+  e.stopPropagation();closeAllDropdowns();
+  const dd=document.getElementById("fileHistDropdown");
+  renderFileHistory();
+  dd.classList.toggle("hidden");
+  // Position near the comparison button
+  dd.style.position="fixed";
+  const rect=this.getBoundingClientRect();
+  dd.style.top=(rect.bottom+4)+"px";dd.style.left=rect.left+"px";
+});
+document.getElementById("fileHistDropdown").addEventListener("click",function(e){
+  const item=e.target.closest(".file-hist-item");if(!item)return;
+  const idx=parseInt(item.dataset.sidx);
+  const sessions=loadSessions();
+  const session=sessions[idx];if(!session)return;
+  document.getElementById("fileHistDropdown").classList.add("hidden");
+  restoreSession(session);
+  showMode(session.mode==='comparison'?'comp':'analyzer');
+});
 document.getElementById("rerunBtn").addEventListener("click",runAnalysis);
 document.getElementById("periodFrom").addEventListener("change",runAnalysis);
 document.getElementById("periodTo").addEventListener("change",runAnalysis);
@@ -1014,7 +1190,38 @@ document.querySelectorAll("[data-cexp]").forEach(b=>b.addEventListener("click",f
 let chatHistory=[];
 let cachedContext=null;
 let reasonResults=null;
+let compReasonResults={}; // key: propertyId -> reasonResults
 let contextStatus="idle";
+
+// Reason engine for comparison mode — runs for each property
+async function runCompReasonEngines(aligned){
+  contextStatus="loading";updateContextIndicator();
+  for(const p of aligned){
+    if(!p.results)continue;
+    const st=document.getElementById(`compState_${p.id}`)?.value||"";
+    const ct=document.getElementById(`compCity_${p.id}`)?.value||"";
+    const stAbbr=st?Object.entries(Context.STATE_ABBR).find(([k])=>k===st)?.[1]||"":"";
+    if(!stAbbr||!ct)continue;
+    const assetInfo={type:document.getElementById(`compType_${p.id}`)?.value||"Multifamily Residential",location:ct+", "+st,city:ct,state:st};
+    const months=p.sliced?.months||p.alignedData?.months||[];
+    try{
+      const dataContext=await Context.fetchDataContext(stAbbr,ct,months);
+      const rr=Adapter.runReasonEngine(p.results,months,assetInfo,dataContext);
+      compReasonResults[p.id]=rr;
+    }catch(e){console.error("Comp reason engine error for",p.label,e);}
+  }
+  // Merge all reason results into one lookup for popup
+  reasonResults={lookup:{},results:[],clusters:[]};
+  Object.values(compReasonResults).forEach(rr=>{
+    if(rr?.lookup)Object.assign(reasonResults.lookup,rr.lookup);
+    if(rr?.results)reasonResults.results.push(...rr.results);
+    if(rr?.clusters)reasonResults.clusters.push(...rr.clusters);
+  });
+  window.reasonResults=reasonResults;
+  contextStatus="done";updateContextIndicator();
+  // Save comparison session
+  saveCompSession();
+}
 
 function buildDataContext(){
   if(cachedContext)return cachedContext;
@@ -1053,6 +1260,8 @@ async function runReasonEngineAsync(months){
     reasonResults=Adapter.runReasonEngine(RESULTS,months,assetInfo,dataContext);
     window.reasonResults=reasonResults;
     contextStatus="done";
+    // Auto-save session
+    saveCurrentSession(window._currentFileName||"analysis");
   }catch(err){console.error("Reason engine error:",err);contextStatus="error";}
   updateContextIndicator();
 }
@@ -1095,10 +1304,31 @@ document.addEventListener("click",function(e){
   if(!cls.includes("cell-anom")&&!cls.includes("cell-mat-pos")&&!cls.includes("cell-mat-neg")&&!cls.includes("cell-seas"))return;
   const tr=cell.closest("tr");if(!tr)return;
   const cells=Array.from(tr.querySelectorAll("td"));const cellIdx=cells.indexOf(cell);
-  const metricName=cells[0]?.textContent?.trim()||"?";const monthIdx=cellIdx-2;
-  const sliced=window._sliced||DATA;if(!sliced||!RESULTS)return;
-  const month=sliced.months[monthIdx]||"?";
-  const met=RESULTS.find(r=>r.name===metricName);if(!met)return;
+  const metricName=cells[0]?.textContent?.trim()||"?";
+
+  // Determine if this is comparison or analyzer table
+  const isComp=!!tr.closest("#compTable");
+  let monthIdx,month,met,months;
+  if(isComp){
+    monthIdx=cellIdx-3; // metric, src, type, then months
+    const aligned=window._compAligned;
+    if(!aligned||!aligned.length)return;
+    months=aligned[0].sliced?aligned[0].sliced.months:aligned[0].alignedData.months;
+    month=months[monthIdx]||"?";
+    // Find which property this row belongs to (via src badge color)
+    const srcBadge=cells[1]?.querySelector(".src-badge");
+    const propLabel=srcBadge?.textContent?.trim()||"";
+    const prop=aligned.find(p=>p.label===propLabel);
+    met=prop?.results?.find(r=>r.name===metricName);
+  }else{
+    monthIdx=cellIdx-2; // metric, type, then months
+    const sliced=window._sliced||DATA;
+    if(!sliced||!RESULTS)return;
+    months=sliced.months;
+    month=months[monthIdx]||"?";
+    met=RESULTS.find(r=>r.name===metricName);
+  }
+  if(!met)return;
   const r=met.res[monthIdx];if(!r)return;
   const dir=r.at==="pos"?"Positive (good)":"Negative (bad)";
   const method=r.zm==="ch"?"Change (month-over-month)":"Value (deviation from mean)";
@@ -1137,7 +1367,7 @@ function renderReasonPanel(data){
 }
 
 document.addEventListener("click",function(e){
-  const btn=e.target.closest(".pop-explain-btn");if(!btn)return;
+  const btn=e.target.closest(".pop-explain-btn");if(!btn||btn.classList.contains("ai-deep-btn"))return;
   const metricName=btn.dataset.metric,month=btn.dataset.month,midx=parseInt(btn.dataset.midx);
   const key=metricName+"|||"+midx;const data=reasonResults?.lookup[key];
   document.getElementById("anomPopup").classList.add("hidden");
@@ -1145,14 +1375,40 @@ document.addEventListener("click",function(e){
   panel.classList.remove("hidden");
   if(!data){body.innerHTML='<div class="ai-error">No explanation data available.</div>';return;}
   let html='<div style="margin-bottom:12px;font-size:13px;font-weight:700;color:#eeeef4;">'+metricName+" \u2014 "+month+"</div>"+renderReasonPanel(data);
-  html+='<div style="margin-top:16px;border-top:1px solid #2a2a38;padding-top:12px;"><button class="pop-explain-btn ai-deep-btn" data-metric="'+metricName+'" data-month="'+month+'" data-midx="'+midx+'" style="background:#6d28d9;width:100%;margin-top:0;">\ud83e\udde0 Deep Analysis with AI <span style="font-weight:400;font-size:9px;opacity:0.7;">(paid)</span></button></div><div id="aiDeepResult"></div>';
+  // Check if AI deep analysis was already done
+  const aiCacheKey="aiDeep_"+metricName+"_"+month;
+  let cachedAI=null;
+  try{cachedAI=JSON.parse(localStorage.getItem(aiCacheKey));}catch(e){}
+  if(cachedAI){
+    html+='<div style="margin-top:16px;border-top:1px solid #2a2a38;padding-top:12px;">';
+    html+='<div style="font-size:11px;color:#a78bfa;font-weight:700;margin-bottom:8px;">\ud83e\udde0 AI Deep Analysis <span style="font-weight:400;font-size:9px;opacity:0.7;">(cached)</span></div>';
+    if(cachedAI.primaryReason)html+='<div class="ai-card"><div class="ai-card-primary"><strong>'+(cachedAI.primaryReason.category||"")+":</strong> "+(cachedAI.primaryReason.explanation||"")+"</div></div>";
+    if(cachedAI.alternatives?.length){html+='<div class="ai-card"><div class="ai-card-alts">';cachedAI.alternatives.forEach((a,i)=>{html+="<div><strong>"+(i+1)+". "+(a.category||"")+":</strong> "+(a.explanation||"")+"</div>";});html+="</div></div>";}
+    if(cachedAI.localContext)html+='<div class="ai-card"><div class="ai-card-primary"><strong>Local Context:</strong> '+cachedAI.localContext+"</div></div>";
+    if(cachedAI.recommendation)html+='<div class="ai-insight"><p><strong>Recommendation:</strong> '+cachedAI.recommendation+"</p></div>";
+    if(cachedAI.raw)html+='<div class="ai-card"><div class="ai-card-primary">'+cachedAI.raw+"</div></div>";
+    html+='</div>';
+    html+='<div style="margin-top:8px;"><button class="pop-explain-btn ai-deep-btn" data-metric="'+metricName+'" data-month="'+month+'" data-midx="'+midx+'" style="background:#3f3f46;width:100%;margin-top:0;font-weight:400;">\ud83d\udd04 Re-analyze with AI <span style="font-size:9px;opacity:0.7;">(paid)</span></button></div>';
+  }else{
+    html+='<div style="margin-top:16px;border-top:1px solid #2a2a38;padding-top:12px;"><button class="pop-explain-btn ai-deep-btn" data-metric="'+metricName+'" data-month="'+month+'" data-midx="'+midx+'" style="background:#6d28d9;width:100%;margin-top:0;">\ud83e\udde0 Deep Analysis with AI <span style="font-weight:400;font-size:9px;opacity:0.7;">(paid)</span></button></div>';
+  }
+  html+='<div id="aiDeepResult"></div>';
   body.innerHTML=html;
 });
 
 document.addEventListener("click",function(e){
   const btn=e.target.closest(".ai-deep-btn");if(!btn)return;
   const metricName=btn.dataset.metric,month=btn.dataset.month,midx=parseInt(btn.dataset.midx);
-  const met=RESULTS.find(r=>r.name===metricName);if(!met)return;
+  // Find metric in analyzer or comparison results
+  let met=null;
+  if(RESULTS)met=RESULTS.find(r=>r.name===metricName);
+  if(!met&&window._compAligned){
+    for(const p of window._compAligned){
+      met=p.results?.find(r=>r.name===metricName);
+      if(met)break;
+    }
+  }
+  if(!met)return;
   const r=met.res[midx];if(!r)return;
   const container=document.getElementById("aiDeepResult");if(!container)return;
   container.innerHTML='<div class="ai-loading" style="margin-top:12px;"><span class="spinner"></span> Claude is analyzing...</div>';
@@ -1161,6 +1417,9 @@ document.addEventListener("click",function(e){
   fetch("/api/analyze-reasons",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({mode:"explain",context:cachedContext||buildDataContext(),anomaly,...ctx})})
   .then(resp=>{if(!resp.ok)throw new Error("API error "+resp.status);return resp.json();})
   .then(data=>{
+    // Save to localStorage
+    const aiCacheKey="aiDeep_"+metricName+"_"+month;
+    try{localStorage.setItem(aiCacheKey,JSON.stringify(data));}catch(e){}
     let h='<div style="margin-top:12px;border-top:1px solid #3b1f7a;padding-top:12px;"><div style="font-size:11px;color:#a78bfa;font-weight:700;margin-bottom:8px;">\ud83e\udde0 AI Deep Analysis</div>';
     if(data.primaryReason)h+='<div class="ai-card"><div class="ai-card-primary"><strong>'+(data.primaryReason.category||"")+":</strong> "+(data.primaryReason.explanation||"")+"</div></div>";
     if(data.alternatives?.length){h+='<div class="ai-card"><div class="ai-card-alts">';data.alternatives.forEach((a,i)=>{h+="<div><strong>"+(i+1)+". "+(a.category||"")+":</strong> "+(a.explanation||"")+"</div>";});h+="</div></div>";}
@@ -1171,5 +1430,7 @@ document.addEventListener("click",function(e){
   }).catch(err=>{container.innerHTML='<div class="ai-error" style="margin-top:12px;">Error: '+err.message+"</div>";});
 });
 </script>
+</body>
+</html>
 </body>
 </html>
