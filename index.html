@@ -572,6 +572,8 @@ document.addEventListener("click",function(e){
   if(item){const val=parseInt(item.dataset.val);const wrap=item.closest(".pp-wrap");const input=wrap.querySelector("input[type=text]");if(input&&val){input.value=val.toLocaleString();}closeAllDropdowns();return;}
   const nitem=e.target.closest(".nm-item");
   if(nitem){const val=nitem.dataset.val;const wrap=nitem.closest(".pp-wrap");const input=wrap.querySelector("input[type=text]");if(input){input.value=val;}closeAllDropdowns();return;}
+  // Don't close if clicking inside a file history dropdown — let its own handler work
+  if(e.target.closest(".file-hist-dropdown"))return;
   closeAllDropdowns();
 });
 
