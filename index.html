@@ -39,11 +39,11 @@
   .mode-card::before{content:'';position:absolute;inset:0;border-radius:var(--radius-lg);opacity:0;transition:opacity 0.3s;background:linear-gradient(135deg,var(--accent-glow),transparent 60%);}
   .mode-card:hover{border-color:var(--accent);transform:translateY(-2px);box-shadow:0 12px 40px rgba(0,0,0,0.4),0 0 0 1px var(--accent);}
   .mode-card:hover::before{opacity:1;}
-  .mode-card-top{padding:32px 32px 0;position:relative;z-index:1;}
-  .mode-card-top .icon{font-size:32px;margin-bottom:16px;display:flex;align-items:center;justify-content:center;width:56px;height:56px;background:var(--bg-elevated);border:1px solid var(--border);border-radius:12px;}
-  .mode-card-top h2{font-family:var(--font-display);font-size:14px;font-weight:700;color:var(--text-primary);letter-spacing:0.3px;margin-bottom:8px;}
-  .mode-card-top p{font-size:12px;color:var(--text-secondary);line-height:1.7;}
-  .mode-card-bottom{padding:20px 32px;margin-top:24px;background:var(--bg-elevated);border-top:1px solid var(--border);position:relative;z-index:1;display:flex;justify-content:space-between;align-items:center;}
+  .mode-card-top{padding:32px 32px 0;position:relative;z-index:1;text-align:center;}
+  .mode-card-top .icon{font-size:32px;margin:0 auto 16px;display:flex;align-items:center;justify-content:center;width:56px;height:56px;background:var(--bg-elevated);border:1px solid var(--border);border-radius:12px;}
+  .mode-card-top h2{font-family:var(--font-display);font-size:14px;font-weight:700;color:var(--text-primary);letter-spacing:0.3px;margin-bottom:8px;text-align:center;}
+  .mode-card-top p{font-size:12px;color:var(--text-secondary);line-height:1.7;text-align:center;}
+  .mode-card-bottom{padding:20px 32px;margin-top:24px;background:var(--bg-elevated);border-top:1px solid var(--border);position:relative;z-index:1;display:flex;justify-content:center;align-items:center;gap:8px;}
   .mode-card-bottom span{font-family:var(--font-display);font-size:10px;color:var(--text-muted);letter-spacing:1px;text-transform:uppercase;}
   .mode-card-bottom .arrow{color:var(--accent);font-size:16px;transition:transform 0.2s;}
   .mode-card:hover .mode-card-bottom .arrow{transform:translateX(4px);}
@@ -162,7 +162,7 @@
   .hidden{display:none!important;}
   #fileInput{display:none;}
   .city-search-wrap{position:relative;}
-  .file-hist-dropdown{position:absolute;top:100%;left:0;margin-top:4px;background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--radius-lg);width:360px;max-height:320px;overflow-y:auto;z-index:60;box-shadow:0 12px 40px rgba(0,0,0,0.6);}
+  .file-hist-dropdown{position:fixed;margin-top:4px;background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--radius-lg);width:360px;max-height:320px;overflow-y:auto;z-index:60;box-shadow:0 12px 40px rgba(0,0,0,0.6);}
   .file-hist-dropdown.hidden{display:none;}
   .file-hist-item{padding:12px 16px;cursor:pointer;border-bottom:1px solid var(--border);transition:all 0.15s;}
   .file-hist-item:hover{background:var(--bg-elevated);border-left:3px solid var(--accent);padding-left:13px;}
@@ -1040,14 +1040,21 @@ function saveSessions(sessions){
     localStorage.setItem(SESSION_KEY,JSON.stringify(toSave));
   }catch(e){
     console.warn('Session save failed (quota), trying without dataContext:',e);
-    // Strip heavy data and retry
-    toSave.forEach(s=>{s.dataContext=null;});
+    toSave.forEach(s=>{s.dataContext=null;s.compReasonResults=null;});
     try{
       localStorage.setItem(SESSION_KEY,JSON.stringify(toSave));
     }catch(e2){
-      console.warn('Still too large, keeping only metadata:',e2);
-      const lite=toSave.map(s=>({mode:s.mode,fileName:s.fileName,savedAt:s.savedAt,monthCount:s.monthCount,metricCount:s.metricCount,state:s.state,city:s.city,price:s.price,propType:s.propType,data:s.data,results:s.results,sliced:s.sliced,slicedSkip:s.slicedSkip,chatHistory:s.chatHistory||[]}));
-      try{localStorage.setItem(SESSION_KEY,JSON.stringify(lite));}catch(e3){console.error('Session save completely failed:',e3);}
+      console.warn('Still too large, stripping more:',e2);
+      toSave.forEach(s=>{
+        // Keep reasonResults.lookup but drop the full results array and clusters
+        if(s.reasonResults){s.reasonResults={lookup:s.reasonResults.lookup||{},results:[],clusters:[]};}
+        s.chatHistory=(s.chatHistory||[]).slice(-4);
+      });
+      try{localStorage.setItem(SESSION_KEY,JSON.stringify(toSave));}catch(e3){
+        console.warn('Last resort — metadata only:',e3);
+        const lite=toSave.map(s=>({mode:s.mode,fileName:s.fileName,savedAt:s.savedAt,monthCount:s.monthCount,metricCount:s.metricCount,state:s.state,city:s.city,price:s.price,propType:s.propType,data:s.data,results:s.results,sliced:s.sliced,slicedSkip:s.slicedSkip,reasonResults:s.reasonResults||null}));
+        try{localStorage.setItem(SESSION_KEY,JSON.stringify(lite));}catch(e4){console.error('Session save completely failed:',e4);}
+      }
     }
   }
 }
@@ -1106,18 +1113,24 @@ function restoreSession(session){
   }
   DATA=session.data;RESULTS=session.results;
   window._sliced=session.sliced;window._slicedSkip=session.slicedSkip;
-  window.reasonResults=session.reasonResults;reasonResults=session.reasonResults;
-  window._dataContext=session.dataContext;chatHistory=session.chatHistory||[];
+  window.reasonResults=session.reasonResults||null;reasonResults=session.reasonResults||null;
+  window._dataContext=session.dataContext||null;chatHistory=session.chatHistory||[];
   cachedContext=null;cachedContext=buildDataContext();
-  contextStatus=session.reasonResults?"done":"idle";
+  contextStatus=session.reasonResults?.lookup&&Object.keys(session.reasonResults.lookup).length>0?"done":"idle";
   document.getElementById("aiState").value=session.state||"";
   document.getElementById("aiCity").value=session.city||"";
   document.getElementById("ppInput").value=session.price?session.price.toLocaleString():"0";
   if(session.propType)document.getElementById("aiPropType").value=session.propType;
   document.getElementById("uploadBtn").textContent="✓ "+session.fileName;
   document.getElementById("thresholdInfo").textContent="10bps: $"+fmt(Math.round((session.price*0.001)/12))+"/mo";
+  window._currentFileName=session.fileName;
   populatePeriod("periodFrom","periodTo",session.sliced?.months||DATA.months);
   renderAnalyzer();
+  // If no reasonResults saved, re-run the engine
+  if(!reasonResults||!reasonResults.lookup||Object.keys(reasonResults.lookup).length===0){
+    const months=session.sliced?.months||DATA.months;
+    runReasonEngineAsync(months);
+  }
   const msgs=document.getElementById("chatMessages");
   if(msgs&&chatHistory.length){msgs.innerHTML="";chatHistory.forEach(m=>{msgs.innerHTML+='<div class="chat-msg '+(m.role==="user"?"user":"ai")+'">'+m.content.replace(/\n/g,"<br>")+'</div>';});}
 }
@@ -1155,6 +1168,11 @@ function restoreCompSession(session){
   RESULTS=allRes;cachedContext=buildDataContext();
   renderComp();
   document.getElementById("chatBar").classList.remove("hidden");
+  // If no reasonResults saved, re-run the engine
+  if(!reasonResults||!reasonResults.lookup||Object.keys(reasonResults.lookup).length===0){
+    const aligned=window._compAligned;
+    if(aligned&&aligned.length)runCompReasonEngines(aligned);
+  }
   const msgs=document.getElementById("chatMessages");
   if(msgs&&chatHistory.length){msgs.innerHTML="";chatHistory.forEach(m=>{msgs.innerHTML+='<div class="chat-msg '+(m.role==="user"?"user":"ai")+'">'+m.content.replace(/\n/g,"<br>")+'</div>';});}
 }
@@ -1185,6 +1203,10 @@ document.getElementById("fileHistBtn").addEventListener("click",function(e){
   const dd=document.getElementById("fileHistDropdown");
   renderFileHistory();
   dd.classList.toggle("hidden");
+  if(!dd.classList.contains("hidden")){
+    const rect=this.getBoundingClientRect();
+    dd.style.top=(rect.bottom+4)+"px";dd.style.left=rect.left+"px";
+  }
 });
 document.getElementById("compFileHistBtn").addEventListener("click",function(e){
   e.stopPropagation();closeAllDropdowns();
