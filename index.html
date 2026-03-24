@@ -1094,13 +1094,17 @@ function sessionId(fileName,mode){
 }
 
 async function gzipB64(obj){
+  // JSON.stringify may throw RangeError if obj is too large — let it propagate so caller can strip
   const bytes=new TextEncoder().encode(JSON.stringify(obj));
   const cs=new CompressionStream('gzip');
   const w=cs.writable.getWriter();w.write(bytes);w.close();
   const buf=await new Response(cs.readable).arrayBuffer();
-  const u8=new Uint8Array(buf);let s='';
-  for(let i=0;i<u8.length;i++)s+=String.fromCharCode(u8[i]);
-  return btoa(s);
+  const u8=new Uint8Array(buf);
+  // Chunked conversion — avoids O(n²) string building that causes RangeError for large data
+  const CHUNK=8192;const parts=[];
+  for(let i=0;i<u8.length;i+=CHUNK)
+    parts.push(String.fromCharCode.apply(null,u8.subarray(i,i+CHUNK)));
+  return btoa(parts.join(''));
 }
 async function gunzipB64(b64){
   const bin=atob(b64);const u8=new Uint8Array(bin.length);
@@ -1112,21 +1116,33 @@ async function gunzipB64(b64){
 async function pushSessionToCloud(session){
   const{results,reasonResults,aiCache,chatHistory,months,sliced,
         properties,compReasonResults,...meta}=session;
-  let envelope;
-  try{
-    const payload={results,reasonResults,aiCache,chatHistory,months,sliced,
-                   properties,compReasonResults};
-    const compressed=await gzipB64(payload);
-    envelope={...meta,_compressed:true,_payload:compressed};
-  }catch(e){
-    console.warn('Compression failed, falling back to plain JSON',e);
-    envelope=session;
+  // Each config strips more data; gzipB64 throws if JSON.stringify fails → try next
+  const configs=[
+    ()=>({results,reasonResults,aiCache,chatHistory,months,sliced,properties,compReasonResults}),
+    ()=>({results,reasonResults,chatHistory,months,sliced,properties,compReasonResults,aiCache:{}}),
+    ()=>({results,chatHistory,months,sliced,properties,aiCache:{},reasonResults:null}),
+    ()=>({results,months,sliced,aiCache:{},reasonResults:null,chatHistory:[]}),
+    ()=>({months,sliced,aiCache:{},reasonResults:null,chatHistory:[]}),
+  ];
+  for(const getP of configs){
+    let _payload;
+    try{_payload=await gzipB64(getP());}
+    catch(e){console.warn('payload too large, trying smaller...',e.message);continue;}
+    let body;
+    try{body=JSON.stringify({...meta,_compressed:true,_payload});}
+    catch(e){continue;}
+    try{
+      const r=await fetch('/api/sessions',{method:'POST',
+        headers:{'Content-Type':'application/json'},body});
+      if(r.ok)return;
+      const err=await r.text();
+      if(err.includes('SQLITE_TOOBIG')||err.includes('too big')){
+        console.warn('Still too large for D1, trying smaller...');continue;
+      }
+      console.error('Cloud push error',r.status,err);return;
+    }catch(e){console.warn('Cloud push failed:',e);return;}
   }
-  try{
-    const r=await fetch('/api/sessions',{method:'POST',
-      headers:{'Content-Type':'application/json'},body:JSON.stringify(envelope)});
-    if(!r.ok){const e=await r.text();console.error('Cloud push error',r.status,e);}
-  }catch(e){console.warn('Cloud push failed:',e);}
+  console.error('Session too large to save even after stripping all optional fields');
 }
 async function deleteSessionFromCloud(id){
   if(!id)return;
