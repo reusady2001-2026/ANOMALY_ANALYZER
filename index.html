@@ -1697,7 +1697,8 @@ document.addEventListener("click",function(e){
     const aiCacheKey=metricName+"_"+month;
     if(!window._aiCache)window._aiCache={};
     window._aiCache[aiCacheKey]=data;
-    if(window._currentFileName)saveCurrentSession(window._currentFileName);
+    if(window._compAligned&&window._compAligned.length)saveCompSession();
+    else if(window._currentFileName)saveCurrentSession(window._currentFileName);
     let h='<div style="margin-top:12px;border-top:1px solid #3b1f7a;padding-top:12px;"><div style="font-size:11px;color:#a78bfa;font-weight:700;margin-bottom:8px;">\ud83e\udde0 AI Deep Analysis</div>';
     if(data.primaryReason)h+='<div class="ai-card"><div class="ai-card-primary"><strong>'+(data.primaryReason.category||"")+":</strong> "+(data.primaryReason.explanation||"")+"</div></div>";
     if(data.alternatives?.length){h+='<div class="ai-card"><div class="ai-card-alts">';data.alternatives.forEach((a,i)=>{h+="<div><strong>"+(i+1)+". "+(a.category||"")+":</strong> "+(a.explanation||"")+"</div>";});h+="</div></div>";}
