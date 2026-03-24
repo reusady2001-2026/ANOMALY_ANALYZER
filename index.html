@@ -1144,9 +1144,9 @@ async function _postToCloud(body){
 }
 async function pushSessionToCloud(session){
   const{results,reasonResults,aiCache,chatHistory,months,sliced,
-        properties,compReasonResults,...meta}=session;
+        properties,compReasonResults,data,...meta}=session;
   const payload={results,reasonResults,aiCache,chatHistory,months,sliced,
-                 properties,compReasonResults};
+                 properties,compReasonResults,data};
   let gzBytes;
   try{gzBytes=await objToGzipBytes(payload);}
   catch(e){console.error('Session compression failed:',e);return;}
@@ -1188,6 +1188,7 @@ function saveCurrentSession(fileName){
     city:document.getElementById("aiCity")?.value||"",
     price:getP("ppInput"),
     propType:document.getElementById("aiPropType")?.value||"",
+    data:DATA?{months:DATA.months,metrics:DATA.metrics}:null,
     results:RESULTS,
     reasonResults:window.reasonResults||null,
     chatHistory:chatHistory||[],
@@ -1553,6 +1554,8 @@ async function sendChat(question){
     const data=await resp.json();const answer=data.answer||data.raw||JSON.stringify(data);
     el.id="";el.classList.remove("ai-loading");el.innerHTML=answer.replace(/\n/g,"<br>");
     chatHistory.push({role:"user",content:question});chatHistory.push({role:"assistant",content:answer});
+    if(window._compAligned&&window._compAligned.length)saveCompSession();
+    else if(window._currentFileName)saveCurrentSession(window._currentFileName);
   }catch(err){const el=document.getElementById("chatLoading");if(el){el.id="";el.classList.remove("ai-loading");el.textContent="Error: "+err.message;}}
   msgs.scrollTop=msgs.scrollHeight;
 }
