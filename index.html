@@ -671,9 +671,7 @@ function getPeriodIndices(fromId, toId){
   return [parseInt(document.getElementById(fromId).value)||0, parseInt(document.getElementById(toId).value)||0];
 }
 
-// Supabase direct-access credentials (fetched once from /api/config)
-let _sbUrl="",_sbKey="";
-(async()=>{try{const r=await fetch('/api/config');if(r.ok){const c=await r.json();_sbUrl=c.supabaseUrl||"";_sbKey=c.supabaseKey||"";}}catch(e){}})();
+
 
 // ANALYZER
 let DATA=null,RESULTS=null,FILTER="all",SEC_FILTER="all",MAT_FOCUS=false;
@@ -1096,19 +1094,22 @@ function sessionId(fileName,mode){
 }
 
 async function pushSessionToCloud(session){
-  if(!_sbUrl||!_sbKey){console.warn('Supabase config not loaded');return;}
-  const payload={
-    id:session.id,
-    file_name:session.fileName||null,
-    mode:session.mode||"analyzer",
-    saved_at:new Date(session.savedAt||Date.now()).toISOString(),
-    session_data:session
-  };
+  let body;
+  try{ body=JSON.stringify(session); }
+  catch(e){
+    const s2={...session,aiCache:{}};
+    try{ body=JSON.stringify(s2); }
+    catch(e2){
+      const s3={...s2,reasonResults:null};
+      try{ body=JSON.stringify(s3); }
+      catch(e3){ console.error('Session too large to save',e3); return; }
+    }
+  }
   try{
-    const r=await fetch(`${_sbUrl}/rest/v1/sessions`,{
+    const r=await fetch('/api/sessions',{
       method:'POST',
-      headers:{'apikey':_sbKey,'Authorization':`Bearer ${_sbKey}`,'Content-Type':'application/json','Prefer':'resolution=merge-duplicates,return=minimal'},
-      body:JSON.stringify(payload)
+      headers:{'Content-Type':'application/json'},
+      body
     });
     if(!r.ok){const e=await r.text();console.error('Cloud push error',r.status,e);}
   }catch(e){console.warn('Cloud push failed:',e);}
@@ -1127,6 +1128,7 @@ function saveCurrentSession(fileName){
     mode:'analyzer',
     fileName,
     savedAt:Date.now(),
+    months:sliced.months,
     monthCount:sliced.months.length,
     metricCount:RESULTS.length,
     state:document.getElementById("aiState")?.value||"",
@@ -1187,11 +1189,11 @@ function restoreSession(session){
   document.getElementById("uploadBtn").textContent="✓ "+session.fileName;
   document.getElementById("thresholdInfo").textContent="10bps: $"+fmt(Math.round((session.price*0.001)/12))+"/mo";
   window._currentFileName=session.fileName;
-  populatePeriod("periodFrom","periodTo",session.sliced?.months||DATA.months);
+  populatePeriod("periodFrom","periodTo",session.sliced?.months||session.months||[]);
   renderAnalyzer();
   // If no reasonResults saved, re-run the engine
   if(!reasonResults||!reasonResults.lookup||Object.keys(reasonResults.lookup).length===0){
-    const months=session.sliced?.months||DATA.months;
+    const months=session.sliced?.months||session.months||[];
     runReasonEngineAsync(months);
   }
   const msgs=document.getElementById("chatMessages");
