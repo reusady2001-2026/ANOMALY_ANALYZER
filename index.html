@@ -1172,8 +1172,8 @@ async function deleteSessionFromCloud(id){
 }
 
 function saveCurrentSession(fileName){
-  if(!DATA||!RESULTS)return;
   const sliced=window._sliced||DATA;
+  if(!sliced||!RESULTS)return;
   const session={
     id:sessionId(fileName,'analyzer'),
     mode:'analyzer',
@@ -1215,6 +1215,9 @@ function saveCompSession(){
       price:getP(`compPP_${p.id}`),
       propType:document.getElementById(`compType_${p.id}`)?.value||"",
       results:p.results,
+      data:p.data,
+      sliced:p.sliced,
+      alignedData:p.alignedData,
     })),
     compSkip:window._compSkip,
     reasonResults:window.reasonResults||null,
