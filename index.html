@@ -1129,6 +1129,8 @@ function saveCurrentSession(fileName){
     fileName,
     savedAt:Date.now(),
     months:sliced.months,
+    sliced:{months:sliced.months},
+    slicedSkip:window._slicedSkip||0,
     monthCount:sliced.months.length,
     metricCount:RESULTS.length,
     state:document.getElementById("aiState")?.value||"",
@@ -1175,8 +1177,8 @@ function restoreSession(session){
   if(session.mode==='comparison'){
     restoreCompSession(session);return;
   }
-  DATA=session.data;RESULTS=session.results;
-  window._sliced=session.sliced;window._slicedSkip=session.slicedSkip;
+  DATA=session.data||null;RESULTS=session.results;
+  window._sliced=session.sliced||(session.months?{months:session.months}:null);window._slicedSkip=session.slicedSkip||0;
   window.reasonResults=session.reasonResults||null;reasonResults=session.reasonResults||null;
   window._dataContext=session.dataContext||null;chatHistory=session.chatHistory||[];
   window._aiCache=session.aiCache||{};
