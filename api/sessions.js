@@ -24,8 +24,20 @@ module.exports = async function handler(req, res) {
 
   try {
     if (req.method === "GET") {
+      // Serve chunk rows for a specific session (used when restoring chunked sessions)
+      if (req.query.chunksFor) {
+        const rows = await d1(
+          "SELECT session_data FROM sessions WHERE id LIKE ? ORDER BY id",
+          [req.query.chunksFor + "@@%"]
+        );
+        const chunks = rows.map(row => {
+          try { return JSON.parse(row.session_data); } catch (e) { return {}; }
+        });
+        return res.status(200).json(chunks);
+      }
+      // Normal listing — exclude internal chunk rows
       const rows = await d1(
-        "SELECT id, file_name, mode, saved_at, session_data FROM sessions ORDER BY saved_at DESC LIMIT 20"
+        "SELECT id, file_name, mode, saved_at, session_data FROM sessions WHERE id NOT LIKE '%@@%' ORDER BY saved_at DESC LIMIT 20"
       );
       const sessions = rows.map(row => {
         let data = {};
@@ -58,7 +70,8 @@ module.exports = async function handler(req, res) {
     if (req.method === "DELETE") {
       const id = req.query.id;
       if (!id) return res.status(400).json({ error: "Missing id" });
-      await d1("DELETE FROM sessions WHERE id = ?", [id]);
+      // Delete main row + any chunk rows
+      await d1("DELETE FROM sessions WHERE id = ? OR id LIKE ?", [id, id + "@@%"]);
       return res.status(200).json({ ok: true });
     }
 
