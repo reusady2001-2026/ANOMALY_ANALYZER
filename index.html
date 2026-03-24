@@ -1093,14 +1093,36 @@ function sessionId(fileName,mode){
   return `${a}-${b.slice(0,4)}-4${b.slice(4,7)}-8${a.slice(0,3)}-${b}${a.slice(0,4)}`;
 }
 
-async function gzipB64(obj){
-  // JSON.stringify may throw RangeError if obj is too large — let it propagate so caller can strip
-  const bytes=new TextEncoder().encode(JSON.stringify(obj));
+// Compress payload to gzip bytes using streaming — avoids large intermediate strings.
+// Top-level arrays are iterated element-by-element so no single JSON.stringify call
+// ever sees the entire dataset at once.
+async function objToGzipBytes(obj){
+  const enc=new TextEncoder();
   const cs=new CompressionStream('gzip');
-  const w=cs.writable.getWriter();w.write(bytes);w.close();
-  const buf=await new Response(cs.readable).arrayBuffer();
-  const u8=new Uint8Array(buf);
-  // Chunked conversion — avoids O(n²) string building that causes RangeError for large data
+  const w=cs.writable.getWriter();
+  const wr=s=>w.write(enc.encode(s));
+  wr('{');let f=true;
+  for(const[k,v]of Object.entries(obj)){
+    if(v===undefined)continue;
+    if(!f)wr(',');
+    wr(JSON.stringify(k)+':');
+    if(Array.isArray(v)){
+      wr('[');
+      for(let i=0;i<v.length;i++){if(i)wr(',');wr(JSON.stringify(v[i]));}
+      wr(']');
+    }else{wr(JSON.stringify(v));}
+    f=false;
+  }
+  wr('}');
+  await w.close();
+  const parts=[];const rd=cs.readable.getReader();
+  for(;;){const{done,value}=await rd.read();if(done)break;parts.push(value);}
+  const tot=parts.reduce((s,c)=>s+c.length,0);
+  const out=new Uint8Array(tot);let off=0;
+  for(const c of parts){out.set(c,off);off+=c.length;}
+  return out;
+}
+function u8ToB64(u8){
   const CHUNK=8192;const parts=[];
   for(let i=0;i<u8.length;i+=CHUNK)
     parts.push(String.fromCharCode.apply(null,u8.subarray(i,i+CHUNK)));
@@ -1113,36 +1135,35 @@ async function gunzipB64(b64){
   const w=ds.writable.getWriter();w.write(u8);w.close();
   return JSON.parse(await new Response(ds.readable).text());
 }
+async function _postToCloud(body){
+  try{
+    const r=await fetch('/api/sessions',{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    if(!r.ok){const e=await r.text();console.error('Cloud push error',r.status,e);}
+  }catch(e){console.warn('Cloud push failed:',e);}
+}
 async function pushSessionToCloud(session){
   const{results,reasonResults,aiCache,chatHistory,months,sliced,
         properties,compReasonResults,...meta}=session;
-  // Each config strips more data; gzipB64 throws if JSON.stringify fails → try next
-  const configs=[
-    ()=>({results,reasonResults,aiCache,chatHistory,months,sliced,properties,compReasonResults}),
-    ()=>({results,reasonResults,chatHistory,months,sliced,properties,compReasonResults,aiCache:{}}),
-    ()=>({results,chatHistory,months,sliced,properties,aiCache:{},reasonResults:null}),
-    ()=>({results,months,sliced,aiCache:{},reasonResults:null,chatHistory:[]}),
-    ()=>({months,sliced,aiCache:{},reasonResults:null,chatHistory:[]}),
-  ];
-  for(const getP of configs){
-    let _payload;
-    try{_payload=await gzipB64(getP());}
-    catch(e){console.warn('payload too large, trying smaller...',e.message);continue;}
-    let body;
-    try{body=JSON.stringify({...meta,_compressed:true,_payload});}
-    catch(e){continue;}
-    try{
-      const r=await fetch('/api/sessions',{method:'POST',
-        headers:{'Content-Type':'application/json'},body});
-      if(r.ok)return;
-      const err=await r.text();
-      if(err.includes('SQLITE_TOOBIG')||err.includes('too big')){
-        console.warn('Still too large for D1, trying smaller...');continue;
-      }
-      console.error('Cloud push error',r.status,err);return;
-    }catch(e){console.warn('Cloud push failed:',e);return;}
+  const payload={results,reasonResults,aiCache,chatHistory,months,sliced,
+                 properties,compReasonResults};
+  let gzBytes;
+  try{gzBytes=await objToGzipBytes(payload);}
+  catch(e){console.error('Session compression failed:',e);return;}
+  const b64=u8ToB64(gzBytes);
+  // Split into ≤700KB chunks so each D1 row stays under the 1MB limit
+  const MAX=700000;
+  if(b64.length<=MAX){
+    await _postToCloud({...meta,_compressed:true,_payload:b64});
+  }else{
+    const chunks=[];
+    for(let i=0;i<b64.length;i+=MAX)chunks.push(b64.slice(i,i+MAX));
+    await _postToCloud({...meta,_chunked:true,chunkCount:chunks.length});
+    for(let i=0;i<chunks.length;i++){
+      await _postToCloud({id:meta.id+'@@'+i,_isChunk:true,
+        sessionId:meta.id,chunkIdx:i,chunkData:chunks[i]});
+    }
   }
-  console.error('Session too large to save even after stripping all optional fields');
 }
 async function deleteSessionFromCloud(id){
   if(!id)return;
@@ -1306,11 +1327,21 @@ async function renderFileHistory(ddId, modeFilter){
       if(e.target.classList.contains("file-hist-del"))return;
       e.stopPropagation();
       const idx=parseInt(this.dataset.sidx);
-      const session=sessions[idx];
+      let session=sessions[idx];
       if(!session)return;
       dd.classList.add("hidden");
-      if(session._compressed&&session._payload){
-        try{const p=await gunzipB64(session._payload);Object.assign(session,p);}
+      if(session._chunked&&session.chunkCount){
+        // Reassemble chunks then decompress
+        try{
+          const r=await fetch('/api/sessions?chunksFor='+encodeURIComponent(session._cloudId));
+          const chunkRows=await r.json();
+          chunkRows.sort((a,b)=>a.chunkIdx-b.chunkIdx);
+          const fullB64=chunkRows.map(c=>c.chunkData).join('');
+          const payload=await gunzipB64(fullB64);
+          session={...session,...payload};
+        }catch(err){console.error('Failed to load session chunks',err);}
+      }else if(session._compressed&&session._payload){
+        try{const p=await gunzipB64(session._payload);session={...session,...p};}
         catch(err){console.error('Failed to decompress session',err);}
       }
       if(session.mode==='comparison'){showMode("comp");restoreCompSession(session);}
