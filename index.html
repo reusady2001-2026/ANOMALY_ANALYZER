@@ -1093,24 +1093,38 @@ function sessionId(fileName,mode){
   return `${a}-${b.slice(0,4)}-4${b.slice(4,7)}-8${a.slice(0,3)}-${b}${a.slice(0,4)}`;
 }
 
+async function gzipB64(obj){
+  const bytes=new TextEncoder().encode(JSON.stringify(obj));
+  const cs=new CompressionStream('gzip');
+  const w=cs.writable.getWriter();w.write(bytes);w.close();
+  const buf=await new Response(cs.readable).arrayBuffer();
+  const u8=new Uint8Array(buf);let s='';
+  for(let i=0;i<u8.length;i++)s+=String.fromCharCode(u8[i]);
+  return btoa(s);
+}
+async function gunzipB64(b64){
+  const bin=atob(b64);const u8=new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++)u8[i]=bin.charCodeAt(i);
+  const ds=new DecompressionStream('gzip');
+  const w=ds.writable.getWriter();w.write(u8);w.close();
+  return JSON.parse(await new Response(ds.readable).text());
+}
 async function pushSessionToCloud(session){
-  let body;
-  try{ body=JSON.stringify(session); }
-  catch(e){
-    const s2={...session,aiCache:{}};
-    try{ body=JSON.stringify(s2); }
-    catch(e2){
-      const s3={...s2,reasonResults:null};
-      try{ body=JSON.stringify(s3); }
-      catch(e3){ console.error('Session too large to save',e3); return; }
-    }
+  const{results,reasonResults,aiCache,chatHistory,months,sliced,
+        properties,compReasonResults,...meta}=session;
+  let envelope;
+  try{
+    const payload={results,reasonResults,aiCache,chatHistory,months,sliced,
+                   properties,compReasonResults};
+    const compressed=await gzipB64(payload);
+    envelope={...meta,_compressed:true,_payload:compressed};
+  }catch(e){
+    console.warn('Compression failed, falling back to plain JSON',e);
+    envelope=session;
   }
   try{
-    const r=await fetch('/api/sessions',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body
-    });
+    const r=await fetch('/api/sessions',{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify(envelope)});
     if(!r.ok){const e=await r.text();console.error('Cloud push error',r.status,e);}
   }catch(e){console.warn('Cloud push failed:',e);}
 }
@@ -1272,13 +1286,17 @@ async function renderFileHistory(ddId, modeFilter){
     return '<div class="file-hist-item" data-sidx="'+i+'" data-cloud-id="'+(s.id||'')+'"><div class="file-hist-name">'+modeLabel+s.fileName+'</div><div class="file-hist-meta">'+dateStr+' · '+s.monthCount+' months · '+s.metricCount+' metrics'+(loc?' · '+loc:'')+'</div><button class="file-hist-del" data-sidx="'+i+'" data-cloud-id="'+(s.id||'')+'" title="Delete session">\xd7</button></div>';
   }).join("");
   dd.querySelectorAll(".file-hist-item").forEach(item=>{
-    item.addEventListener("click",function(e){
+    item.addEventListener("click",async function(e){
       if(e.target.classList.contains("file-hist-del"))return;
       e.stopPropagation();
       const idx=parseInt(this.dataset.sidx);
       const session=sessions[idx];
       if(!session)return;
       dd.classList.add("hidden");
+      if(session._compressed&&session._payload){
+        try{const p=await gunzipB64(session._payload);Object.assign(session,p);}
+        catch(err){console.error('Failed to decompress session',err);}
+      }
       if(session.mode==='comparison'){showMode("comp");restoreCompSession(session);}
       else{restoreSession(session);showMode("analyzer");}
     });
