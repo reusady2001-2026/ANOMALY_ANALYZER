@@ -1093,27 +1093,34 @@ function sessionId(fileName,mode){
   return `${a}-${b.slice(0,4)}-4${b.slice(4,7)}-8${a.slice(0,3)}-${b}${a.slice(0,4)}`;
 }
 
-// Compress payload to gzip bytes using streaming — avoids large intermediate strings.
-// Top-level arrays are iterated element-by-element so no single JSON.stringify call
-// ever sees the entire dataset at once.
+// Compress payload to gzip bytes using recursive streaming — avoids large intermediate
+// strings at every nesting level. JSON.stringify is only called on individual primitive
+// strings (for escaping), never on whole objects or arrays.
 async function objToGzipBytes(obj){
   const enc=new TextEncoder();
   const cs=new CompressionStream('gzip');
   const w=cs.writable.getWriter();
   const wr=s=>w.write(enc.encode(s));
-  wr('{');let f=true;
-  for(const[k,v]of Object.entries(obj)){
-    if(v===undefined)continue;
-    if(!f)wr(',');
-    wr(JSON.stringify(k)+':');
-    if(Array.isArray(v)){
+  async function writeVal(val){
+    if(val===null||val===undefined){wr('null');return;}
+    if(typeof val==='number'||typeof val==='boolean'){wr(String(val));return;}
+    if(typeof val==='string'){wr(JSON.stringify(val));return;}
+    if(Array.isArray(val)){
       wr('[');
-      for(let i=0;i<v.length;i++){if(i)wr(',');wr(JSON.stringify(v[i]));}
-      wr(']');
-    }else{wr(JSON.stringify(v));}
-    f=false;
+      for(let i=0;i<val.length;i++){if(i)wr(',');await writeVal(val[i]);}
+      wr(']');return;
+    }
+    wr('{');let f=true;
+    for(const[k,v]of Object.entries(val)){
+      if(v===undefined)continue;
+      if(!f)wr(',');
+      wr(JSON.stringify(k)+':');
+      await writeVal(v);
+      f=false;
+    }
+    wr('}');
   }
-  wr('}');
+  await writeVal(obj);
   await w.close();
   const parts=[];const rd=cs.readable.getReader();
   for(;;){const{done,value}=await rd.read();if(done)break;parts.push(value);}
