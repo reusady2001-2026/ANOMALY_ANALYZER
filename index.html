@@ -422,6 +422,9 @@
 <div id="tooltip" class="tooltip-bar"></div>
 
 <script>
+// ══════════════════════════════════════════════════════════════
+// SECTION: Constants & Utility Functions (format, math, parse)
+// ══════════════════════════════════════════════════════════════
 const SKIP=2,LIN=0.04,FLOOR_C=1.0,STOL=0.10;
 
 // Price history (localStorage, max 10) — custom dropdown
@@ -581,11 +584,7 @@ document.addEventListener("click",function(e){
   closeAllDropdowns();
 });
 
-// Name history (localStorage, max 10)
-function loadNameHistory(){try{return JSON.parse(localStorage.getItem("nmHist")||"[]");}catch(e){return[];}}
-function saveNameToHistory(val){if(!val||val==="Property A"||val==="Property B")return;let h=loadNameHistory();h=h.filter(v=>v!==val);h.unshift(val);if(h.length>10)h=h.slice(0,10);localStorage.setItem("nmHist",JSON.stringify(h));refreshAllNameDropdowns();}
-function refreshAllNameDropdowns(){}
-refreshAllNameDropdowns();
+
 function mn(a){if(!a.length)return 0;return a.reduce((s,v)=>s+v,0)/a.length;}
 function sdev(a){if(a.length<2)return 0;const m=mn(a);return Math.sqrt(a.reduce((s,v)=>s+(v-m)**2,0)/(a.length-1));}
 function allZ(a){return a.every(v=>v===0);}
@@ -673,7 +672,9 @@ function getPeriodIndices(fromId, toId){
 
 
 
-// ANALYZER
+// ══════════════════════════════════════════════════════════════
+// SECTION: Analyzer Engine (runAnalysis, renderAnalyzer, stats)
+// ══════════════════════════════════════════════════════════════
 let DATA=null,RESULTS=null,FILTER="all",SEC_FILTER="all",MAT_FOCUS=false;
 function runAnalysis(){if(!DATA)return;const pp=getP("ppInput");
   if(pp<=0){alert("Please enter a Purchase Price before running analysis.");return;}
@@ -704,7 +705,9 @@ function renderAnalyzer(){if(!RESULTS)return;const sliced=window._sliced||DATA;i
   filtered.forEach((met,mi)=>{const lc=met.sec==="income"?"income-label":"expense-label";html+=`<tr onmouseenter="showTip(this,${mi})" onmouseleave="hideTip()"><td class="metric-cell ${lc}" title="${met.name}">${met.name}</td><td class="type-cell">${met.mt==="sporadic"?"SPR":"CNT"}</td>${renderCells(met,MAT_FOCUS)}<td class="trend-cell">${trendHTML(met.tr.all)}</td><td class="trend-cell">${trendHTML(met.tr.m12)}</td><td class="trend-cell">${trendHTML(met.tr.m3)}</td><td class="q-cell">${met.sq?met.sq.k:"—"}</td><td class="q-cell">${met.wq?met.wq.k:"—"}</td></tr>`;});
   html+=`</tbody>`;document.getElementById("mainTable").innerHTML=html;window._filt=filtered;window._data=sliced;}
 
-// COMPARISON — dynamic N properties
+// ══════════════════════════════════════════════════════════════
+// SECTION: Comparison Mode (runComp, renderComp, alignMultiData)
+// ══════════════════════════════════════════════════════════════
 let CVIEW="all",CFILT="all",CSEC="all",COMP_MAT_FOCUS=false;
 
 function alignMultiData(props){
@@ -740,8 +743,6 @@ function runComp(){
     if(!st){alert(`Select State for Property ${p.label}`);return;}
     if(!ct){alert(`Enter City for Property ${p.label}`);return;}
     if(pp>0)savePriceToHistory(pp);
-    const nm=document.getElementById(`compName_${p.id}`)?.value;
-    if(nm)saveNameToHistory(nm);
   }
 
   let aligned;
@@ -901,12 +902,13 @@ function resetAll(){
   document.querySelectorAll("[data-cview]").forEach((b,i)=>b.className=i===0?"btn btn-active":"btn");
   document.querySelectorAll("[data-cfilt]").forEach((b,i)=>b.className=i===0?"btn btn-active":"btn");
   document.querySelectorAll("[data-csec]").forEach((b,i)=>b.className=i===0?"btn btn-sec-active":"btn");
-  // Price + name history stays — just refresh dropdowns
+  // Price history stays — just refresh dropdowns
   refreshAllDropdowns();
-  refreshAllNameDropdowns();
 }
 
-// ============ EXPORT ============
+// ══════════════════════════════════════════════════════════════
+// SECTION: Export (Excel, HTML — buildStyledTable, doExport)
+// ══════════════════════════════════════════════════════════════
 function getCellColor(r, mf){
   if(!r)return null;
   if(r.st==="skip"||r.st==="pre")return{bg:"#D9D9D9",fg:"#999999"};
@@ -1082,7 +1084,9 @@ function doCompExport(type){
 
 function showMode(m){document.getElementById("modeSelect").classList.toggle("hidden",m!=="select");document.getElementById("analyzerMode").classList.toggle("hidden",m!=="analyzer");document.getElementById("compMode").classList.toggle("hidden",m!=="comp");document.getElementById("backBtn").classList.toggle("hidden",m==="select");document.getElementById("headerSub").textContent=m==="analyzer"?"Analyzer Mode · Single Property":m==="comp"?"Comparison Mode · Two Properties":"Multifamily P&L · Z-Score Engine · Dynamic Thresholds";}
 
-// ── SESSION PERSISTENCE (Supabase via /api/sessions) ───
+// ══════════════════════════════════════════════════════════════
+// SECTION: Session Persistence (save, load, compress, D1 cloud)
+// ══════════════════════════════════════════════════════════════
 
 // Deterministic ID based on fileName+mode so Supabase can upsert the same row
 function sessionId(fileName,mode){
@@ -1158,7 +1162,21 @@ async function _postToCloud(body){
     if(!r.ok){const e=await r.text();console.error('Cloud push error',r.status,e);}
   }catch(e){console.warn('Cloud push failed:',e);}
 }
+// Coalescing save queue: only one pushSessionToCloud runs at a time.
+// If a new save is requested while one is active, the new session replaces
+// the pending one so the LAST (most recent) state always wins.
+let _pendingSession=null,_pushActive=false;
 async function pushSessionToCloud(session){
+  _pendingSession=session;
+  if(_pushActive)return;
+  _pushActive=true;
+  while(_pendingSession){
+    const s=_pendingSession;_pendingSession=null;
+    await _pushSessionImpl(s);
+  }
+  _pushActive=false;
+}
+async function _pushSessionImpl(session){
   const{results,reasonResults,aiCache,chatHistory,months,sliced,
         properties,compReasonResults,data,...meta}=session;
   const payload={results,reasonResults,aiCache,chatHistory,months,sliced,
@@ -1280,6 +1298,10 @@ function restoreCompSession(session){
   console.log("[RestoreComp] Starting, properties:",session.properties?.length);
   chatHistory=session.chatHistory||[];
   window._aiCache=session.aiCache||{};
+  // Merge with localStorage backup (for cross-device the cloud value is authoritative;
+  // on same device the localStorage backup fills in anything the cloud may have lost)
+  try{const _lk='aiCacheBak_'+sessionId(session.fileName||'','comparison');const _bk=localStorage.getItem(_lk);if(_bk){Object.assign(window._aiCache,JSON.parse(_bk));}}catch(e){}
+  console.log('[aiCache] restored (comp) keys:',Object.keys(window._aiCache).length,'(cloud:',Object.keys(session.aiCache||{}).length,')');
   cachedContext=null;
   reasonResults=session.reasonResults||null;
   window.reasonResults=reasonResults;
@@ -1381,7 +1403,9 @@ async function renderFileHistory(ddId, modeFilter){
   });
 }
 
-// EVENTS
+// ══════════════════════════════════════════════════════════════
+// SECTION: Event Handlers (buttons, dropdowns, mode switching)
+// ══════════════════════════════════════════════════════════════
 document.getElementById("modeAnalyzer").addEventListener("click",()=>showMode("analyzer"));
 document.getElementById("modeComparison").addEventListener("click",()=>showMode("comp"));
 document.getElementById("backBtn").addEventListener("click",()=>{resetAll();showMode("select");});
@@ -1502,6 +1526,9 @@ async function runCompReasonEngines(aligned){
   saveCompSession();
 }
 
+// ══════════════════════════════════════════════════════════════
+// SECTION: AI & Reason Engine (context, rules, deep analysis)
+// ══════════════════════════════════════════════════════════════
 function buildDataContext(){
   if(cachedContext)return cachedContext;
   if(!RESULTS)return"";
@@ -1721,7 +1748,10 @@ document.addEventListener("click",function(e){
     if(!window._aiCache)window._aiCache={};
     window._aiCache[aiCacheKey]=data;
     // Persist to localStorage as a durability backup (in case cloud save fails)
-    try{if(window._currentFileName){localStorage.setItem('aiCacheBak_'+sessionId(window._currentFileName,'analyzer'),JSON.stringify(window._aiCache));}}catch(e){}
+    try{const _isComp=window._compAligned&&window._compAligned.length;
+      const _bkName=_isComp?window._compAligned.map(p=>document.getElementById('compName_'+p.id)?.value||p.label).join(' vs '):window._currentFileName;
+      if(_bkName)localStorage.setItem('aiCacheBak_'+sessionId(_bkName,_isComp?'comparison':'analyzer'),JSON.stringify(window._aiCache));
+    }catch(e){}
     console.log('[aiCache] saved key:',aiCacheKey,'total:',Object.keys(window._aiCache).length);
     if(window._compAligned&&window._compAligned.length)saveCompSession();
     else if(window._currentFileName)saveCurrentSession(window._currentFileName);
@@ -1733,6 +1763,15 @@ document.addEventListener("click",function(e){
     if(data.raw)h+='<div class="ai-card"><div class="ai-card-primary">'+data.raw+"</div></div>";
     h+="</div>";container.innerHTML=h;
   }).catch(err=>{container.innerHTML='<div class="ai-error" style="margin-top:12px;">Error: '+err.message+"</div>";});
+});
+// Flush aiCache to localStorage on tab close so pending cloud saves aren't lost
+window.addEventListener('beforeunload',function(){
+  if(!window._aiCache||!Object.keys(window._aiCache).length)return;
+  try{
+    const isComp=window._compAligned&&window._compAligned.length;
+    const nm=isComp?window._compAligned.map(p=>document.getElementById('compName_'+p.id)?.value||p.label).join(' vs '):window._currentFileName;
+    if(nm)localStorage.setItem('aiCacheBak_'+sessionId(nm,isComp?'comparison':'analyzer'),JSON.stringify(window._aiCache));
+  }catch(e){}
 });
 </script>
 </body>
