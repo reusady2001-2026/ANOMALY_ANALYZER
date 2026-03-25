@@ -1101,13 +1101,16 @@ async function objToGzipBytes(obj){
   const cs=new CompressionStream('gzip');
   const w=cs.writable.getWriter();
   const wr=s=>w.write(enc.encode(s));
-  async function writeVal(val){
+  // Synchronous recursive serializer — wr() writes are fire-and-forget (stream queues
+  // them in order). Async recursion would create one microtask per primitive value,
+  // freezing the browser on large datasets.
+  function writeVal(val){
     if(val===null||val===undefined){wr('null');return;}
     if(typeof val==='number'||typeof val==='boolean'){wr(String(val));return;}
     if(typeof val==='string'){wr(JSON.stringify(val));return;}
     if(Array.isArray(val)){
       wr('[');
-      for(let i=0;i<val.length;i++){if(i)wr(',');await writeVal(val[i]);}
+      for(let i=0;i<val.length;i++){if(i)wr(',');writeVal(val[i]);}
       wr(']');return;
     }
     wr('{');let f=true;
@@ -1115,12 +1118,12 @@ async function objToGzipBytes(obj){
       if(v===undefined)continue;
       if(!f)wr(',');
       wr(JSON.stringify(k)+':');
-      await writeVal(v);
+      writeVal(v);
       f=false;
     }
     wr('}');
   }
-  await writeVal(obj);
+  writeVal(obj);
   await w.close();
   const parts=[];const rd=cs.readable.getReader();
   for(;;){const{done,value}=await rd.read();if(done)break;parts.push(value);}
