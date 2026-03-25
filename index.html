@@ -680,6 +680,7 @@ function runAnalysis(){if(!DATA)return;const pp=getP("ppInput");
   if(!document.getElementById("aiState").value){alert("Please select a State before running analysis.");return;}
   if(!document.getElementById("aiCity").value.trim()){alert("Please enter a City before running analysis.");return;}
   window._aiCache={};
+  try{if(window._currentFileName){localStorage.removeItem('aiCacheBak_'+sessionId(window._currentFileName,'analyzer'));}}catch(e){}
   if(pp>0)savePriceToHistory(pp);document.getElementById("thresholdInfo").textContent=`10bps: $${fmt(Math.round((pp*0.001)/12))}/mo`;
   const[fi,ti]=getPeriodIndices("periodFrom","periodTo");
   const maxTo=DATA.months.length-SKIP-1;
@@ -1110,7 +1111,7 @@ async function objToGzipBytes(obj){
   function emit(s){buf+=s;if(buf.length>=CHUNK)flush();}
   function writeVal(val){
     if(val===null||val===undefined){emit('null');return;}
-    if(typeof val==='number'||typeof val==='boolean'){emit(String(val));return;}
+    if(typeof val==='number'||typeof val==='boolean'){emit(typeof val==='number'&&!isFinite(val)?'null':String(val));return;}
     if(typeof val==='string'){emit(JSON.stringify(val));return;}
     if(Array.isArray(val)){
       emit('[');
@@ -1252,6 +1253,9 @@ function restoreSession(session){
   window.reasonResults=session.reasonResults||null;reasonResults=session.reasonResults||null;
   window._dataContext=session.dataContext||null;chatHistory=session.chatHistory||[];
   window._aiCache=session.aiCache||{};
+  // Merge with localStorage backup in case cloud save was incomplete
+  try{const _lk='aiCacheBak_'+sessionId(session.fileName||'','analyzer');const _bk=localStorage.getItem(_lk);if(_bk){Object.assign(window._aiCache,JSON.parse(_bk));}}catch(e){}
+  console.log('[aiCache] restored keys:',Object.keys(window._aiCache).length,'(cloud:',Object.keys(session.aiCache||{}).length,')');
   cachedContext=null;cachedContext=buildDataContext();
   contextStatus=session.reasonResults?.lookup&&Object.keys(session.reasonResults.lookup).length>0?"done":"idle";
   document.getElementById("aiState").value=session.state||"";
@@ -1673,6 +1677,7 @@ document.addEventListener("click",function(e){
   // Check if AI deep analysis was already done
   const aiCacheKey=metricName+"_"+month;
   const cachedAI=(window._aiCache||{})[aiCacheKey]||null;
+  console.log('[aiCache] lookup key:',aiCacheKey,'found:',!!cachedAI,'cache size:',Object.keys(window._aiCache||{}).length);
   if(cachedAI){
     html+='<div style="margin-top:16px;border-top:1px solid #2a2a38;padding-top:12px;">';
     html+='<div style="font-size:11px;color:#a78bfa;font-weight:700;margin-bottom:8px;">\ud83e\udde0 AI Deep Analysis <span style="font-weight:400;font-size:9px;opacity:0.7;">(cached)</span></div>';
@@ -1715,6 +1720,9 @@ document.addEventListener("click",function(e){
     const aiCacheKey=metricName+"_"+month;
     if(!window._aiCache)window._aiCache={};
     window._aiCache[aiCacheKey]=data;
+    // Persist to localStorage as a durability backup (in case cloud save fails)
+    try{if(window._currentFileName){localStorage.setItem('aiCacheBak_'+sessionId(window._currentFileName,'analyzer'),JSON.stringify(window._aiCache));}}catch(e){}
+    console.log('[aiCache] saved key:',aiCacheKey,'total:',Object.keys(window._aiCache).length);
     if(window._compAligned&&window._compAligned.length)saveCompSession();
     else if(window._currentFileName)saveCurrentSession(window._currentFileName);
     let h='<div style="margin-top:12px;border-top:1px solid #3b1f7a;padding-top:12px;"><div style="font-size:11px;color:#a78bfa;font-weight:700;margin-bottom:8px;">\ud83e\udde0 AI Deep Analysis</div>';
