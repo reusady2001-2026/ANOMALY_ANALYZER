@@ -1093,37 +1093,42 @@ function sessionId(fileName,mode){
   return `${a}-${b.slice(0,4)}-4${b.slice(4,7)}-8${a.slice(0,3)}-${b}${a.slice(0,4)}`;
 }
 
-// Compress payload to gzip bytes using recursive streaming — avoids large intermediate
-// strings at every nesting level. JSON.stringify is only called on individual primitive
-// strings (for escaping), never on whole objects or arrays.
+// Compress payload to gzip bytes. writeVal is synchronous and emits into a
+// 64KB string buffer; the buffer is encoded+queued in bulk, then written to
+// the CompressionStream in large chunks. This avoids both:
+//  • RangeError from one huge JSON.stringify call on a large nested object
+//  • Flooding the stream with 100 000+ tiny w.write() calls (which allocates
+//    as many Promises/Uint8Arrays synchronously, freezing the tab for 30+ s).
 async function objToGzipBytes(obj){
   const enc=new TextEncoder();
   const cs=new CompressionStream('gzip');
   const w=cs.writable.getWriter();
-  const wr=s=>w.write(enc.encode(s));
-  // Synchronous recursive serializer — wr() writes are fire-and-forget (stream queues
-  // them in order). Async recursion would create one microtask per primitive value,
-  // freezing the browser on large datasets.
+  const CHUNK=65536;
+  let buf="";
+  const pending=[];
+  function flush(){if(!buf.length)return;pending.push(enc.encode(buf));buf="";}
+  function emit(s){buf+=s;if(buf.length>=CHUNK)flush();}
   function writeVal(val){
-    if(val===null||val===undefined){wr('null');return;}
-    if(typeof val==='number'||typeof val==='boolean'){wr(String(val));return;}
-    if(typeof val==='string'){wr(JSON.stringify(val));return;}
+    if(val===null||val===undefined){emit('null');return;}
+    if(typeof val==='number'||typeof val==='boolean'){emit(String(val));return;}
+    if(typeof val==='string'){emit(JSON.stringify(val));return;}
     if(Array.isArray(val)){
-      wr('[');
-      for(let i=0;i<val.length;i++){if(i)wr(',');writeVal(val[i]);}
-      wr(']');return;
+      emit('[');
+      for(let i=0;i<val.length;i++){if(i)emit(',');writeVal(val[i]);}
+      emit(']');return;
     }
-    wr('{');let f=true;
+    emit('{');let f=true;
     for(const[k,v]of Object.entries(val)){
       if(v===undefined)continue;
-      if(!f)wr(',');
-      wr(JSON.stringify(k)+':');
+      if(!f)emit(',');
+      emit(JSON.stringify(k)+':');
       writeVal(v);
       f=false;
     }
-    wr('}');
+    emit('}');
   }
-  writeVal(obj);
+  writeVal(obj);flush();
+  for(const chunk of pending)await w.write(chunk);
   await w.close();
   const parts=[];const rd=cs.readable.getReader();
   for(;;){const{done,value}=await rd.read();if(done)break;parts.push(value);}
