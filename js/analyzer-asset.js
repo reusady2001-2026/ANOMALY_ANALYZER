@@ -93,6 +93,26 @@ function analyzeAsset(name, allV, months, isInc, pp, skip) {
     }
   }
 
+  // Seasonality detection — same logic as operational, but:
+  // For T3 (zm="t3") compare chv like ch; for val compare v
+  const seasP=[];
+  for(let i=0;i<res.length;i++){
+    const r=res[i];if(!r.mat)continue;
+    for(const ci of[i-12,i+12]){
+      if(ci<0||ci>=res.length||ci<=i)continue;
+      const o=res[ci];if(!o||!o.mat)continue;
+      if(r.at!==o.at)continue;
+      const rv=(r.zm==="ch"||r.zm==="t3")?r.chv:r.v;
+      const ov=(o.zm==="ch"||o.zm==="t3")?o.chv:o.v;
+      if(rv==null||ov==null)continue;
+      if(ov!==0&&Math.abs(rv/ov-1)<=STOL)seasP.push([i,ci]);
+    }
+  }
+  for(const[a,b]of seasP){
+    res[a].seas=true;res[a].mat=false;res[a].st="seas";
+    res[b].seas=true;res[b].mat=false;res[b].st="seas";
+  }
+
   // Trend (same calculation as operational analyze())
   const tc = [];
   const ts = mt === "continuous" ? oi : 0;

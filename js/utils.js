@@ -217,7 +217,7 @@ function parseSheet(wb){
 function readFile(file){return new Promise((res,rej)=>{const r=new FileReader();r.onload=e=>{try{res(parseSheet(XLSX.read(new Uint8Array(e.target.result),{type:"array"})));}catch(ex){rej(ex);}};r.onerror=()=>rej(new Error("Read failed"));r.readAsArrayBuffer(file);});}
 
 // SHARED UI
-function cellClass(r,matFocus){if(!r)return"";if(PLATFORM==="asset"){if(r.mat&&r.st==="anom")return r.at==="pos"?"cell-mat-pos":"cell-mat-neg";return"";}if(r.st==="skip")return"cell-skip";if(r.st==="pre")return"cell-pre";if(matFocus){if(r.mat&&r.st==="anom")return r.at==="pos"?"cell-mat-pos":"cell-mat-neg";return"";}if(r.st==="seas")return"cell-seas";if(r.mat&&r.st==="anom")return r.at==="pos"?"cell-mat-pos":"cell-mat-neg";if(r.st==="anom")return"cell-anom";return"";}
+function cellClass(r,matFocus){if(!r)return"";if(PLATFORM==="asset"){if(r.st==="seas")return"cell-seas";if(r.mat&&r.st==="anom")return r.at==="pos"?"cell-mat-pos":"cell-mat-neg";return"";}if(r.st==="skip")return"cell-skip";if(r.st==="pre")return"cell-pre";if(matFocus){if(r.mat&&r.st==="anom")return r.at==="pos"?"cell-mat-pos":"cell-mat-neg";return"";}if(r.st==="seas")return"cell-seas";if(r.mat&&r.st==="anom")return r.at==="pos"?"cell-mat-pos":"cell-mat-neg";if(r.st==="anom")return"cell-anom";return"";}
 function trendHTML(v){if(v>0)return`<span class="trend-up">▲ ${fmt(v)}</span>`;if(v<0)return`<span class="trend-down">▼ ${fmt(v)}</span>`;return`<span class="trend-flat">—</span>`;}
 function getStats(R){let ta=0,mp=0,mn2=0,se=0,rc=0;R.forEach(r=>r.res.forEach(m=>{if(m.st==="anom")ta++;if(m.mat&&m.at==="pos")mp++;if(m.mat&&m.at==="neg")mn2++;if(m.st==="seas"||m.seas)se++;if(m.recur)rc++;}));return{ta,mp,mn:mn2,se,rc,tm:R.length};}
 function statsHTML(s){return[{l:"Metrics",v:s.tm,c:"#6366f1"},{l:"Anomalies",v:s.ta,c:"#ea580c"},{l:"Material ↑",v:s.mp,c:"#16a34a"},{l:"Material ↓",v:s.mn,c:"#dc2626"},{l:"Seasonal",v:s.se,c:"#d97706"},{l:"🔄",v:s.rc,c:"#a78bfa"}].map(x=>`<div class="stat-card"><div class="label">${x.l}</div><div class="value" style="color:${x.c}">${x.v}</div></div>`).join("");}
@@ -253,6 +253,8 @@ function showMode(m){
   document.getElementById("compMode").classList.toggle("hidden",m!=="comp");
   document.getElementById("backBtn").classList.toggle("hidden",m==="appSelect");
   const pfx=PLATFORM==="asset"?"Asset Management":"Operational";
+  const ptEl=document.getElementById("platformTitle");
+  if(ptEl)ptEl.textContent=m==="select"?pfx:"";
   document.getElementById("headerSub").textContent=
     m==="analyzer"?pfx+" · Analyzer Mode":
     m==="comp"?pfx+" · Comparison Mode":
