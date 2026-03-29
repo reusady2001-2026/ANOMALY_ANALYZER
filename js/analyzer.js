@@ -27,6 +27,7 @@ function runAnalysis(){if(!DATA)return;const pp=getP("ppInput");
 }
 function renderAnalyzer(){if(!RESULTS)return;const sliced=window._sliced||DATA;if(!sliced)return;
   ["analyzerFilters","rerunBtn","statsRow","legendRow","tableWrap","chatBar"].forEach(id=>document.getElementById(id).classList.remove("hidden"));
+  document.getElementById("rerunBtn").textContent="Re-Analyze";
   document.getElementById("legendRow").innerHTML=PLATFORM==="asset"
     ?'<span class="legend-item"><span class="legend-box" style="background:#b91c1c;"></span> Material ↓</span><span class="legend-item"><span class="legend-box" style="background:#15803d;"></span> Material ↑</span><span class="legend-item"><span class="legend-box" style="background:#b45309;"></span> Seasonal</span>'
     :'<span class="legend-item"><span class="legend-box" style="background:#b91c1c;"></span> Material ↓</span><span class="legend-item"><span class="legend-box" style="background:#15803d;"></span> Material ↑</span><span class="legend-item"><span class="legend-box" style="outline:2px solid #ea580c;outline-offset:-2px;"></span> Anomaly</span><span class="legend-item"><span class="legend-box" style="background:#b45309;"></span> Seasonal</span><span class="legend-item"><span class="legend-box" style="background:#1a1a20;"></span> Skipped</span><span class="legend-item"><span style="font-size:12px;">🔄</span> Recurring</span>';

@@ -13,7 +13,7 @@ document.getElementById("backBtn").addEventListener("click",()=>{
   }
 });
 document.getElementById("uploadBtn").addEventListener("click",()=>document.getElementById("fileInput").click());
-document.getElementById("fileInput").addEventListener("change",async function(e){const f=e.target.files?.[0];if(!f)return;try{DATA=await readFile(f);document.getElementById("uploadBtn").textContent="✓ "+f.name;window._currentFileName=f.name;populatePeriod("periodFrom","periodTo",DATA.months);runAnalysis();}catch(ex){document.getElementById("errorBox").textContent=ex.message;document.getElementById("errorBox").style.display="";}});
+document.getElementById("fileInput").addEventListener("change",async function(e){const f=e.target.files?.[0];if(!f)return;try{DATA=await readFile(f);document.getElementById("uploadBtn").textContent="✓ "+f.name;window._currentFileName=f.name;populatePeriod("periodFrom","periodTo",DATA.months);const rb=document.getElementById("rerunBtn");rb.textContent="Analyze ▶";rb.classList.remove("hidden");}catch(ex){document.getElementById("errorBox").textContent=ex.message;document.getElementById("errorBox").style.display="";}});
 
 // Analyzer file history dropdown — shows only analyzer sessions
 document.getElementById("fileHistBtn").addEventListener("click",function(e){
