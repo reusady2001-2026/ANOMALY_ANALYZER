@@ -278,13 +278,10 @@ async function renderFileHistory(ddId, modeFilter){
   dd.innerHTML='<div class="file-hist-sync">⟳ Loading...</div>';
   let allSessions=[];
   try{
-    const r=await fetch('/api/sessions');
+    const r=await fetch('/api/sessions?platform='+encodeURIComponent(PLATFORM));
     if(r.ok)allSessions=await r.json();
   }catch(e){console.warn('Failed to load sessions:',e);}
-  const sessions=allSessions.filter(s=>
-    (!modeFilter||s.mode===modeFilter)&&
-    (!s.platform||s.platform===PLATFORM)
-  );
+  const sessions=allSessions.filter(s=>!modeFilter||s.mode===modeFilter);
   if(!sessions.length){dd.innerHTML='<div class="file-hist-empty">No recent '+(modeFilter==='comparison'?'comparisons':'analyses')+'</div>';return;}
   dd.innerHTML=sessions.map((s,i)=>{
     const d=new Date(s.savedAt);
@@ -337,11 +334,11 @@ async function renderPropHistory(ddId,prop){
   dd.innerHTML='<div class="file-hist-sync">⟳ Loading...</div>';
   let allSessions=[];
   try{
-    const r=await fetch('/api/sessions');
+    const r=await fetch('/api/sessions?platform='+encodeURIComponent(PLATFORM));
     if(r.ok)allSessions=await r.json();
   }catch(e){console.warn('Failed to load sessions:',e);}
   const sessions=allSessions.filter(s=>
-    s.mode==='analyzer'&&(!s.platform||s.platform===PLATFORM)
+    s.mode==='analyzer'
   );
   if(!sessions.length){
     dd.innerHTML='<div class="file-hist-empty">No saved '+(PLATFORM==='asset'?'Asset Management':'Operational')+' analyses</div>';

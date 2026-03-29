@@ -22,6 +22,11 @@ module.exports = async function handler(req, res) {
     return res.status(500).json({ error: "Cloudflare D1 not configured" });
   }
 
+  // Auto-migration: add platform column if it doesn't exist yet
+  try {
+    await d1("ALTER TABLE sessions ADD COLUMN platform TEXT NOT NULL DEFAULT 'operational'");
+  } catch (e) { /* column already exists — ignore */ }
+
   try {
     if (req.method === "GET") {
       // Serve chunk rows for a specific session (used when restoring chunked sessions)
@@ -35,10 +40,16 @@ module.exports = async function handler(req, res) {
         });
         return res.status(200).json(chunks);
       }
-      // Normal listing — exclude internal chunk rows
-      const rows = await d1(
-        "SELECT id, file_name, mode, saved_at, session_data FROM sessions WHERE id NOT LIKE '%@@%' ORDER BY saved_at DESC LIMIT 20"
-      );
+      // Normal listing — filter by platform if provided, exclude internal chunk rows
+      const platform = req.query.platform || null;
+      const rows = platform
+        ? await d1(
+            "SELECT id, file_name, mode, saved_at, session_data FROM sessions WHERE id NOT LIKE '%@@%' AND platform=? ORDER BY saved_at DESC LIMIT 50",
+            [platform]
+          )
+        : await d1(
+            "SELECT id, file_name, mode, saved_at, session_data FROM sessions WHERE id NOT LIKE '%@@%' ORDER BY saved_at DESC LIMIT 50"
+          );
       const sessions = rows.map(row => {
         let data = {};
         try { data = JSON.parse(row.session_data); } catch (e) {}
@@ -50,16 +61,19 @@ module.exports = async function handler(req, res) {
     if (req.method === "POST") {
       const session = req.body;
       if (!session || !session.id) return res.status(400).json({ error: "Missing session id" });
+      const platform = session.platform || "operational";
       await d1(
-        `INSERT INTO sessions (id, file_name, mode, saved_at, session_data)
-         VALUES (?,?,?,?,?)
+        `INSERT INTO sessions (id, file_name, mode, platform, saved_at, session_data)
+         VALUES (?,?,?,?,?,?)
          ON CONFLICT(id) DO UPDATE SET
            file_name=excluded.file_name, mode=excluded.mode,
+           platform=excluded.platform,
            saved_at=excluded.saved_at, session_data=excluded.session_data`,
         [
           session.id,
           session.fileName || null,
           session.mode || "analyzer",
+          platform,
           new Date(session.savedAt || Date.now()).toISOString(),
           JSON.stringify(session)
         ]
