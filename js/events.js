@@ -1,14 +1,12 @@
 // ══════════════════════════════════════════════════════════════
 // SECTION: Event Handlers (buttons, dropdowns, mode switching)
 // ══════════════════════════════════════════════════════════════
-document.getElementById("modeOperational").addEventListener("click",()=>showMode("select"));
-document.getElementById("modeAssetMgmt").addEventListener("click",()=>showMode("asset"));
+document.getElementById("modeOperational").addEventListener("click",()=>{PLATFORM="operational";showMode("select");});
+document.getElementById("modeAssetMgmt").addEventListener("click",()=>{PLATFORM="asset";showMode("select");});
 document.getElementById("modeAnalyzer").addEventListener("click",()=>showMode("analyzer"));
 document.getElementById("modeComparison").addEventListener("click",()=>showMode("comp"));
 document.getElementById("backBtn").addEventListener("click",()=>{
   if(!document.getElementById("modeSelect").classList.contains("hidden")){
-    showMode("appSelect");
-  }else if(!document.getElementById("assetMgmtMode").classList.contains("hidden")){
     showMode("appSelect");
   }else{
     resetAll();showMode("select");

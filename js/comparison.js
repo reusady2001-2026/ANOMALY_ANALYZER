@@ -52,7 +52,8 @@ function runComp(){
   aligned.forEach(p=>{
     const sl=isFullRange?p.alignedData:sliceData(p.alignedData,fi,Math.min(ti,maxTo));
     const pp=getP(`compPP_${p.id}`);
-    p.results=sl.metrics.map(m=>analyze(m.name,m.values,sl.months,m.isIncome,pp,sk)).filter(Boolean);
+    const engine=PLATFORM==="asset"?analyzeAsset:analyze;
+    p.results=sl.metrics.map(m=>engine(m.name,m.values,sl.months,m.isIncome,pp,sk)).filter(Boolean);
     p.sliced=sl;
   });
 

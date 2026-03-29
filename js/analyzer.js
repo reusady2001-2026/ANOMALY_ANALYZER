@@ -2,6 +2,7 @@
 // SECTION: Analyzer Engine (runAnalysis, renderAnalyzer, stats)
 // ══════════════════════════════════════════════════════════════
 var DATA=null,RESULTS=null,FILTER="all",SEC_FILTER="all",MAT_FOCUS=false;
+var PLATFORM="operational"; // "operational" | "asset"
 function runAnalysis(){if(!DATA)return;const pp=getP("ppInput");
   if(pp<=0){alert("Please enter a Purchase Price before running analysis.");return;}
   if(!document.getElementById("aiState").value){alert("Please select a State before running analysis.");return;}
@@ -14,7 +15,8 @@ function runAnalysis(){if(!DATA)return;const pp=getP("ppInput");
   const isFullRange=(fi===0&&ti>=maxTo);
   const sliced=isFullRange?DATA:sliceData(DATA,fi,ti);
   const sk=isFullRange?SKIP:0;
-  RESULTS=sliced.metrics.map(m=>analyze(m.name,m.values,sliced.months,m.isIncome,pp,sk)).filter(Boolean);
+  const engine=PLATFORM==="asset"?analyzeAsset:analyze;
+  RESULTS=sliced.metrics.map(m=>engine(m.name,m.values,sliced.months,m.isIncome,pp,sk)).filter(Boolean);
   window._sliced=sliced;window._slicedSkip=sk;
   cachedContext=null;cachedContext=buildDataContext();
   renderAnalyzer();
