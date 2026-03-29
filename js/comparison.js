@@ -1,7 +1,7 @@
 // ══════════════════════════════════════════════════════════════
 // SECTION: Comparison Mode (runComp, renderComp, alignMultiData)
 // ══════════════════════════════════════════════════════════════
-var CVIEW="all",CFILT="all",CSEC="all",COMP_MAT_FOCUS=false;
+var CVIEW="all",CFILT="all",CSEC="all",COMP_MAT_FOCUS=false,COMP_MT_FILTER="all";
 
 function alignMultiData(props){
   // Find common months across ALL properties
@@ -111,6 +111,7 @@ function renderComp(){
   if(CFILT==="anom")merged=merged.filter(m=>Object.values(m.entries).some(r=>r.res.some(x=>x.st==="anom"||x.st==="seas")));
   if(CFILT==="mat")merged=merged.filter(m=>Object.values(m.entries).some(r=>r.res.some(x=>x.mat||x.seas)));
   if(CFILT==="seas")merged=merged.filter(m=>Object.values(m.entries).some(r=>r.res.some(x=>x.seas||x.st==="seas"||x.recur)));
+  if(COMP_MT_FILTER!=="all")merged=merged.filter(m=>Object.values(m.entries).some(r=>r.mt===COMP_MT_FILTER));
 
   const months=aligned[0].sliced?aligned[0].sliced.months:aligned[0].alignedData.months;
   const csk=window._compSkip!=null?window._compSkip:SKIP;
@@ -178,7 +179,7 @@ function hideTip(){document.getElementById("tooltip").className="tooltip-bar";}
 
 function resetAll(){
   // Reset analyzer state
-  DATA=null;RESULTS=null;FILTER="all";SEC_FILTER="all";MAT_FOCUS=false;
+  DATA=null;RESULTS=null;FILTER="all";SEC_FILTER="all";MAT_FOCUS=false;MT_FILTER="all";
   window._sliced=null;window._slicedSkip=null;window._filt=null;window._data=null;
   document.getElementById("uploadBtn").textContent="Choose .xlsx / .csv";
   document.getElementById("ppInput").value="0";
@@ -195,8 +196,10 @@ function resetAll(){
   document.getElementById("matFocusBtn").className="btn";
   document.querySelectorAll("[data-filter]").forEach((b,i)=>b.className=i===0?"btn btn-active":"btn");
   document.querySelectorAll("[data-sec]").forEach((b,i)=>b.className=i===0?"btn btn-sec-active":"btn");
+  document.querySelectorAll("[data-mt]").forEach((b,i)=>b.className=i===0?"btn btn-active":"btn");
+  document.querySelectorAll("[data-cmt]").forEach((b,i)=>b.className=i===0?"btn btn-active":"btn");
   // Reset comparison state
-  CVIEW="all";CFILT="all";CSEC="all";COMP_MAT_FOCUS=false;
+  CVIEW="all";CFILT="all";CSEC="all";COMP_MAT_FOCUS=false;COMP_MT_FILTER="all";
   window._compAligned=null;window._compSkip=null;
   // Remove all property cards and recreate 2
   document.getElementById("compProperties").innerHTML="";

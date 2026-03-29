@@ -76,3 +76,5 @@ document.getElementById("exportBtn").addEventListener("click",function(e){e.stop
 document.getElementById("compExportBtn").addEventListener("click",function(e){e.stopPropagation();closeAllDropdowns();document.getElementById("compExportMenu").classList.toggle("open");});
 document.querySelectorAll("[data-exp]").forEach(b=>b.addEventListener("click",function(){doAnalyzerExport(this.dataset.exp);closeAllDropdowns();}));
 document.querySelectorAll("[data-cexp]").forEach(b=>b.addEventListener("click",function(){doCompExport(this.dataset.cexp);closeAllDropdowns();}));
+document.querySelectorAll("[data-mt]").forEach(b=>b.addEventListener("click",function(){MT_FILTER=this.dataset.mt;document.querySelectorAll("[data-mt]").forEach(x=>x.className="btn");this.className="btn btn-active";renderAnalyzer();}));
+document.querySelectorAll("[data-cmt]").forEach(b=>b.addEventListener("click",function(){COMP_MT_FILTER=this.dataset.cmt;document.querySelectorAll("[data-cmt]").forEach(x=>x.className="btn");this.className="btn btn-active";renderComp();}));

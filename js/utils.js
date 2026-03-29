@@ -241,7 +241,7 @@ function statsHTML(s){
 function renderCells(met,matFocus){let h="";met.res.forEach(r=>{const cc=cellClass(r,matFocus),isAsset=PLATFORM==="asset",zL=(!isAsset&&!matFocus&&r.z!=null&&r.st!=="pre"&&r.st!=="skip"&&Math.abs(r.z)>0.01)?`<div class="z-sub">z:${fz(r.z)}</div>`:"",ri=(!isAsset&&!matFocus&&r.recur)?`<span class="recur-icon">🔄</span>`:"",tip=r.z!=null?(isAsset&&r.zm==="t3"?`ΔT3: $${fmt(r.chv)}`:`Z:${fz(r.z)} | ${r.zm||"—"}`):"";h+=`<td class="data-cell ${cc}" title="${tip}"><div>${fmt(r.v)}${ri}</div>${zL}</td>`;});return h;}
 function formatPP(el){el.addEventListener("input",function(e){const raw=e.target.value.replace(/[^0-9]/g,"");e.target.value=raw?parseInt(raw).toLocaleString():"0";});}
 function getP(id){return parseInt(document.getElementById(id).value.replace(/[^0-9]/g,""))||0;}
-function applyFilter(R,filt,sec){let f=R;if(sec!=="all")f=f.filter(r=>r.sec===sec);if(filt==="anom")f=f.filter(r=>r.res.some(m=>m.st==="anom"||m.st==="seas"));if(filt==="mat")f=f.filter(r=>r.res.some(m=>m.mat||m.seas));if(filt==="seas")f=f.filter(r=>r.res.some(m=>m.seas||m.st==="seas"||m.recur));return f;}
+function applyFilter(R,filt,sec,mt){let f=R;if(sec!=="all")f=f.filter(r=>r.sec===sec);if(mt&&mt!=="all")f=f.filter(r=>r.mt===mt);if(filt==="anom")f=f.filter(r=>r.res.some(m=>m.st==="anom"||m.st==="seas"));if(filt==="mat")f=f.filter(r=>r.res.some(m=>m.mat||m.seas));if(filt==="seas")f=f.filter(r=>r.res.some(m=>m.seas||m.st==="seas"||m.recur));return f;}
 
 // PERIOD FILTER
 function getSelectableMonths(months){
