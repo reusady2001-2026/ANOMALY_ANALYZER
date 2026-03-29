@@ -11,7 +11,7 @@ var contextStatus="idle";
 
 // Deterministic ID based on fileName+mode so Supabase can upsert the same row
 function sessionId(fileName,mode){
-  const s=mode+'\0'+fileName;
+  const s=PLATFORM+'\0'+mode+'\0'+fileName;
   let h=5381;
   for(let i=0;i<s.length;i++)h=((h<<5)+h)^s.charCodeAt(i);
   const a=(h>>>0).toString(16).padStart(8,'0');
