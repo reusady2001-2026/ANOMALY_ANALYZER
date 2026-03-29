@@ -1,9 +1,19 @@
 // ══════════════════════════════════════════════════════════════
 // SECTION: Event Handlers (buttons, dropdowns, mode switching)
 // ══════════════════════════════════════════════════════════════
+document.getElementById("modeOperational").addEventListener("click",()=>showMode("select"));
+document.getElementById("modeAssetMgmt").addEventListener("click",()=>showMode("asset"));
 document.getElementById("modeAnalyzer").addEventListener("click",()=>showMode("analyzer"));
 document.getElementById("modeComparison").addEventListener("click",()=>showMode("comp"));
-document.getElementById("backBtn").addEventListener("click",()=>{resetAll();showMode("select");});
+document.getElementById("backBtn").addEventListener("click",()=>{
+  if(!document.getElementById("modeSelect").classList.contains("hidden")){
+    showMode("appSelect");
+  }else if(!document.getElementById("assetMgmtMode").classList.contains("hidden")){
+    showMode("appSelect");
+  }else{
+    resetAll();showMode("select");
+  }
+});
 document.getElementById("uploadBtn").addEventListener("click",()=>document.getElementById("fileInput").click());
 document.getElementById("fileInput").addEventListener("change",async function(e){const f=e.target.files?.[0];if(!f)return;try{DATA=await readFile(f);document.getElementById("uploadBtn").textContent="✓ "+f.name;window._currentFileName=f.name;populatePeriod("periodFrom","periodTo",DATA.months);runAnalysis();}catch(ex){document.getElementById("errorBox").textContent=ex.message;document.getElementById("errorBox").style.display="";}});
 

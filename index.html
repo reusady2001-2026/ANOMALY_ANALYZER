@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Operational Anomaly Analyzer</title>
+<title>Anomaly Analyzer</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700;800&family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -13,8 +13,8 @@
 
 <div class="header">
   <div class="header-left">
-    <h1><span class="dot"></span> OPERATIONAL ANOMALY ANALYZER</h1>
-    <p id="headerSub">Multifamily P&L · Z-Score Engine · Dynamic Thresholds</p>
+    <h1><span class="dot"></span> ANOMALY ANALYZER</h1>
+    <p id="headerSub">Select a platform to continue</p>
   </div>
   <div class="header-right">
     <button class="btn-back hidden" id="backBtn">← Back</button>
@@ -25,7 +25,34 @@
   </div>
 </div>
 
-<div id="modeSelect" class="mode-select">
+<!-- APP SELECT (first screen) -->
+<div id="appSelect" class="mode-select">
+  <div class="mode-card" id="modeOperational">
+    <div class="mode-card-top">
+      <div class="icon">📊</div>
+      <h2>Operational</h2>
+      <p>Analyze property operating statements. Z-Score anomaly detection, dynamic thresholds, seasonality detection, and AI-powered explanations — single property or multi-property comparison.</p>
+    </div>
+    <div class="mode-card-bottom">
+      <span>P&amp;L Analysis</span>
+      <span class="arrow">→</span>
+    </div>
+  </div>
+  <div class="mode-card" id="modeAssetMgmt">
+    <div class="mode-card-top">
+      <div class="icon">🏢</div>
+      <h2>Asset Management</h2>
+      <p>Portfolio-level tracking, KPI dashboards, valuation metrics, and asset lifecycle reporting across your entire portfolio.</p>
+    </div>
+    <div class="mode-card-bottom">
+      <span>Portfolio View</span>
+      <span class="arrow">→</span>
+    </div>
+  </div>
+</div>
+
+<!-- MODE SELECT (operational sub-screen) -->
+<div id="modeSelect" class="mode-select hidden">
   <div class="mode-card" id="modeAnalyzer">
     <div class="mode-card-top">
       <div class="icon">📊</div>
@@ -134,6 +161,13 @@
     <span class="legend-item"><span class="src-badge src-a">A</span> / <span class="src-badge src-b">B</span> Source</span>
   </div>
   <div id="compTableWrap" class="table-wrap hidden"><table id="compTable"></table></div>
+</div>
+
+<!-- ASSET MANAGEMENT (placeholder) -->
+<div id="assetMgmtMode" class="hidden" style="padding:60px 40px;text-align:center;">
+  <div style="font-size:48px;margin-bottom:20px;">🏢</div>
+  <h2 style="font-size:22px;font-weight:700;color:#eeeef4;margin-bottom:10px;">Asset Management</h2>
+  <p style="color:#71717a;font-size:13px;">This module is under construction. Check back soon.</p>
 </div>
 
 <!-- Chat Bar (global, outside both modes) -->

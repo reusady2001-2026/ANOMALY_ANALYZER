@@ -246,4 +246,17 @@ function getPeriodIndices(fromId, toId){
   return [parseInt(document.getElementById(fromId).value)||0, parseInt(document.getElementById(toId).value)||0];
 }
 
-function showMode(m){document.getElementById("modeSelect").classList.toggle("hidden",m!=="select");document.getElementById("analyzerMode").classList.toggle("hidden",m!=="analyzer");document.getElementById("compMode").classList.toggle("hidden",m!=="comp");document.getElementById("backBtn").classList.toggle("hidden",m==="select");document.getElementById("headerSub").textContent=m==="analyzer"?"Analyzer Mode · Single Property":m==="comp"?"Comparison Mode · Two Properties":"Multifamily P&L · Z-Score Engine · Dynamic Thresholds";}
+function showMode(m){
+  document.getElementById("appSelect").classList.toggle("hidden",m!=="appSelect");
+  document.getElementById("modeSelect").classList.toggle("hidden",m!=="select");
+  document.getElementById("analyzerMode").classList.toggle("hidden",m!=="analyzer");
+  document.getElementById("compMode").classList.toggle("hidden",m!=="comp");
+  document.getElementById("assetMgmtMode").classList.toggle("hidden",m!=="asset");
+  document.getElementById("backBtn").classList.toggle("hidden",m==="appSelect");
+  document.getElementById("headerSub").textContent=
+    m==="analyzer"?"Operational · Analyzer Mode":
+    m==="comp"?"Operational · Comparison Mode":
+    m==="select"?"Operational Analytics":
+    m==="asset"?"Asset Management":
+    "Select a platform to continue";
+}
