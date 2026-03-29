@@ -77,6 +77,16 @@ function renderComp(){
     ?'<span class="legend-item"><span class="legend-box" style="background:#b91c1c;"></span> Material ↓</span><span class="legend-item"><span class="legend-box" style="background:#15803d;"></span> Material ↑</span><span class="legend-item"><span class="legend-box" style="background:#b45309;"></span> Seasonal</span><span class="legend-item"><span class="src-badge src-a">A</span> / <span class="src-badge src-b">B</span> Source</span>'
     :'<span class="legend-item"><span class="legend-box" style="background:#b91c1c;"></span> Material ↓</span><span class="legend-item"><span class="legend-box" style="background:#15803d;"></span> Material ↑</span><span class="legend-item"><span class="legend-box" style="outline:2px solid #ea580c;outline-offset:-2px;"></span> Anomaly</span><span class="legend-item"><span class="legend-box" style="background:#b45309;"></span> Seasonal</span><span class="legend-item"><span class="legend-box" style="outline:2px solid #8b5cf6;outline-offset:-2px;"></span> Δ Outlier</span><span class="legend-item"><span class="src-badge src-a">A</span> / <span class="src-badge src-b">B</span> Source</span>';
 
+  // Asset mode: only All / Material filters are valid
+  if(PLATFORM==="asset"&&(CFILT==="anom"||CFILT==="seas"))CFILT="all";
+  document.querySelectorAll("[data-cfilt]").forEach(b=>{
+    const f=b.dataset.cfilt;
+    const hide=PLATFORM==="asset"&&(f==="anom"||f==="seas");
+    b.style.display=hide?"none":"";
+    if(f==="mat")b.textContent=PLATFORM==="asset"?"Material Anomalies":"Material";
+  });
+  document.getElementById("compMatFocusBtn").closest(".ctrl-group").style.display=PLATFORM==="asset"?"none":"";
+
   // Stats
   let statsH="";
   aligned.forEach(p=>{
