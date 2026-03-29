@@ -1,7 +1,7 @@
 // ══════════════════════════════════════════════════════════════
 // SECTION: Comparison Mode (runComp, renderComp, alignMultiData)
 // ══════════════════════════════════════════════════════════════
-var CVIEW="all",CFILT="all",CSEC="all",COMP_MAT_FOCUS=false;
+var CVIEW="all",CFILT="all",CSEC="all",COMP_MAT_FOCUS=false,COMP_MT_FILTER="all";
 
 function alignMultiData(props){
   // Find common months across ALL properties
@@ -77,6 +77,16 @@ function renderComp(){
     ?'<span class="legend-item"><span class="legend-box" style="background:#b91c1c;"></span> Material ↓</span><span class="legend-item"><span class="legend-box" style="background:#15803d;"></span> Material ↑</span><span class="legend-item"><span class="legend-box" style="background:#b45309;"></span> Seasonal</span><span class="legend-item"><span class="src-badge src-a">A</span> / <span class="src-badge src-b">B</span> Source</span>'
     :'<span class="legend-item"><span class="legend-box" style="background:#b91c1c;"></span> Material ↓</span><span class="legend-item"><span class="legend-box" style="background:#15803d;"></span> Material ↑</span><span class="legend-item"><span class="legend-box" style="outline:2px solid #ea580c;outline-offset:-2px;"></span> Anomaly</span><span class="legend-item"><span class="legend-box" style="background:#b45309;"></span> Seasonal</span><span class="legend-item"><span class="legend-box" style="outline:2px solid #8b5cf6;outline-offset:-2px;"></span> Δ Outlier</span><span class="legend-item"><span class="src-badge src-a">A</span> / <span class="src-badge src-b">B</span> Source</span>';
 
+  // Asset mode: only All / Material filters are valid
+  if(PLATFORM==="asset"&&(CFILT==="anom"||CFILT==="seas"))CFILT="all";
+  document.querySelectorAll("[data-cfilt]").forEach(b=>{
+    const f=b.dataset.cfilt;
+    const hide=PLATFORM==="asset"&&(f==="anom"||f==="seas");
+    b.style.display=hide?"none":"";
+    if(f==="mat")b.textContent=PLATFORM==="asset"?"Material Anomalies":"Material";
+  });
+  document.getElementById("compMatFocusBtn").closest(".ctrl-group").style.display=PLATFORM==="asset"?"none":"";
+
   // Stats
   let statsH="";
   aligned.forEach(p=>{
@@ -101,6 +111,7 @@ function renderComp(){
   if(CFILT==="anom")merged=merged.filter(m=>Object.values(m.entries).some(r=>r.res.some(x=>x.st==="anom"||x.st==="seas")));
   if(CFILT==="mat")merged=merged.filter(m=>Object.values(m.entries).some(r=>r.res.some(x=>x.mat||x.seas)));
   if(CFILT==="seas")merged=merged.filter(m=>Object.values(m.entries).some(r=>r.res.some(x=>x.seas||x.st==="seas"||x.recur)));
+  if(COMP_MT_FILTER!=="all")merged=merged.filter(m=>Object.values(m.entries).some(r=>r.mt===COMP_MT_FILTER));
 
   const months=aligned[0].sliced?aligned[0].sliced.months:aligned[0].alignedData.months;
   const csk=window._compSkip!=null?window._compSkip:SKIP;
@@ -168,7 +179,7 @@ function hideTip(){document.getElementById("tooltip").className="tooltip-bar";}
 
 function resetAll(){
   // Reset analyzer state
-  DATA=null;RESULTS=null;FILTER="all";SEC_FILTER="all";MAT_FOCUS=false;
+  DATA=null;RESULTS=null;FILTER="all";SEC_FILTER="all";MAT_FOCUS=false;MT_FILTER="all";
   window._sliced=null;window._slicedSkip=null;window._filt=null;window._data=null;
   document.getElementById("uploadBtn").textContent="Choose .xlsx / .csv";
   document.getElementById("ppInput").value="0";
@@ -185,8 +196,10 @@ function resetAll(){
   document.getElementById("matFocusBtn").className="btn";
   document.querySelectorAll("[data-filter]").forEach((b,i)=>b.className=i===0?"btn btn-active":"btn");
   document.querySelectorAll("[data-sec]").forEach((b,i)=>b.className=i===0?"btn btn-sec-active":"btn");
+  document.querySelectorAll("[data-mt]").forEach((b,i)=>b.className=i===0?"btn btn-active":"btn");
+  document.querySelectorAll("[data-cmt]").forEach((b,i)=>b.className=i===0?"btn btn-active":"btn");
   // Reset comparison state
-  CVIEW="all";CFILT="all";CSEC="all";COMP_MAT_FOCUS=false;
+  CVIEW="all";CFILT="all";CSEC="all";COMP_MAT_FOCUS=false;COMP_MT_FILTER="all";
   window._compAligned=null;window._compSkip=null;
   // Remove all property cards and recreate 2
   document.getElementById("compProperties").innerHTML="";

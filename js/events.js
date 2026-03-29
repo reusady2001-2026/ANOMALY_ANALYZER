@@ -13,7 +13,7 @@ document.getElementById("backBtn").addEventListener("click",()=>{
   }
 });
 document.getElementById("uploadBtn").addEventListener("click",()=>document.getElementById("fileInput").click());
-document.getElementById("fileInput").addEventListener("change",async function(e){const f=e.target.files?.[0];if(!f)return;try{DATA=await readFile(f);document.getElementById("uploadBtn").textContent="✓ "+f.name;window._currentFileName=f.name;populatePeriod("periodFrom","periodTo",DATA.months);runAnalysis();}catch(ex){document.getElementById("errorBox").textContent=ex.message;document.getElementById("errorBox").style.display="";}});
+document.getElementById("fileInput").addEventListener("change",async function(e){const f=e.target.files?.[0];if(!f)return;try{DATA=await readFile(f);document.getElementById("uploadBtn").textContent="✓ "+f.name;window._currentFileName=f.name;populatePeriod("periodFrom","periodTo",DATA.months);const rb=document.getElementById("rerunBtn");rb.textContent="Analyze ▶";rb.classList.remove("hidden");}catch(ex){document.getElementById("errorBox").textContent=ex.message;document.getElementById("errorBox").style.display="";}});
 
 // Analyzer file history dropdown — shows only analyzer sessions
 document.getElementById("fileHistBtn").addEventListener("click",function(e){
@@ -76,3 +76,5 @@ document.getElementById("exportBtn").addEventListener("click",function(e){e.stop
 document.getElementById("compExportBtn").addEventListener("click",function(e){e.stopPropagation();closeAllDropdowns();document.getElementById("compExportMenu").classList.toggle("open");});
 document.querySelectorAll("[data-exp]").forEach(b=>b.addEventListener("click",function(){doAnalyzerExport(this.dataset.exp);closeAllDropdowns();}));
 document.querySelectorAll("[data-cexp]").forEach(b=>b.addEventListener("click",function(){doCompExport(this.dataset.cexp);closeAllDropdowns();}));
+document.querySelectorAll("[data-mt]").forEach(b=>b.addEventListener("click",function(){MT_FILTER=this.dataset.mt;document.querySelectorAll("[data-mt]").forEach(x=>x.className="btn");this.className="btn btn-active";renderAnalyzer();}));
+document.querySelectorAll("[data-cmt]").forEach(b=>b.addEventListener("click",function(){COMP_MT_FILTER=this.dataset.cmt;document.querySelectorAll("[data-cmt]").forEach(x=>x.className="btn");this.className="btn btn-active";renderComp();}));
