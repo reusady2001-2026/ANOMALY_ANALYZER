@@ -83,7 +83,7 @@ function addCompProperty(){
       ${compProperties.length>=2?`<button class="comp-prop-remove" data-propid="${id}" title="Remove">✕</button>`:""}
     </div>
     <div class="comp-prop-fields">
-      <div class="ctrl-group"><label>File *</label><input type="file" accept=".xlsx,.xls,.csv" id="compFile_${id}" style="display:none;"><button class="btn" onclick="document.getElementById('compFile_${id}').click()">Choose file</button></div>
+      <div class="ctrl-group"><label>File *</label><input type="file" accept=".xlsx,.xls,.csv" id="compFile_${id}" style="display:none;"><button class="btn" onclick="document.getElementById('compFile_${id}').click()">Choose file</button><button class="btn" id="compHistBtn_${id}" style="padding:7px 10px;" title="Load from saved analysis">📂</button><div class="file-hist-dropdown hidden" id="compHistDD_${id}"></div></div>
       <div class="ctrl-group"><label>Name</label><input type="text" class="name-input" id="compName_${id}" placeholder="Property ${label}" value="Property ${label}" style="background:#1e1e28;border:1px solid #3f3f46;color:#d8d8e0;padding:7px 10px;border-radius:5px;font-size:11px;font-family:inherit;width:150px;"></div>
       <div class="ctrl-group"><label>Price ($) *</label><div class="pp-wrap"><input type="text" id="compPP_${id}" value="0" style="background:#1e1e28;border:1px solid #3f3f46;color:#ea580c;padding:7px 12px;border-radius:5px;font-size:12px;font-family:inherit;font-weight:700;width:140px;"><button class="pp-hist-btn" data-pp-target="compPP_${id}" title="Price history">▾</button><div class="pp-dropdown" id="compPP_${id}_dd"></div></div></div>
       <div class="ctrl-group"><label>State *</label><select id="compState_${id}" style="background:#1e1e28;border:1px solid #3f3f46;color:#d8d8e0;padding:7px 8px;border-radius:5px;font-size:11px;font-family:inherit;width:140px;">${STATES_HTML}</select></div>
@@ -100,6 +100,19 @@ function addCompProperty(){
   formatPP(document.getElementById(`compPP_${id}`));
   setupCitySearch(`compCity_${id}`,`compCityDD_${id}`,`compState_${id}`);
   refreshAllDropdowns();
+
+  document.getElementById(`compHistBtn_${id}`).addEventListener("click",function(e){
+    e.stopPropagation();closeAllDropdowns();
+    const dd=document.getElementById(`compHistDD_${id}`);
+    renderPropHistory(`compHistDD_${id}`,prop);
+    dd.classList.toggle("hidden");
+    if(!dd.classList.contains("hidden")){
+      const rect=this.getBoundingClientRect();
+      dd.style.position="fixed";
+      dd.style.top=(rect.bottom+4)+"px";
+      dd.style.left=rect.left+"px";
+    }
+  });
 
   document.getElementById(`compFile_${id}`).addEventListener("change",async function(e){
     const f=e.target.files?.[0];if(!f)return;
