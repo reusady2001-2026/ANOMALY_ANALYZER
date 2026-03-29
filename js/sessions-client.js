@@ -132,6 +132,7 @@ function saveCurrentSession(fileName){
   const session={
     id:sessionId(fileName,'analyzer'),
     mode:'analyzer',
+    platform:PLATFORM,
     fileName,
     savedAt:Date.now(),
     months:sliced.months,
@@ -158,6 +159,7 @@ function saveCompSession(){
   const session={
     id:sessionId(names,'comparison'),
     mode:'comparison',
+    platform:PLATFORM,
     fileName:names,
     savedAt:Date.now(),
     monthCount:aligned[0]?.sliced?.months?.length||0,
@@ -276,7 +278,7 @@ async function renderFileHistory(ddId, modeFilter){
   dd.innerHTML='<div class="file-hist-sync">⟳ Loading...</div>';
   let allSessions=[];
   try{
-    const r=await fetch('/api/sessions');
+    const r=await fetch('/api/sessions?platform='+encodeURIComponent(PLATFORM));
     if(r.ok)allSessions=await r.json();
   }catch(e){console.warn('Failed to load sessions:',e);}
   const sessions=allSessions.filter(s=>!modeFilter||s.mode===modeFilter);
@@ -320,6 +322,68 @@ async function renderFileHistory(ddId, modeFilter){
       const cloudId=this.dataset.cloudId;
       if(cloudId)deleteSessionFromCloud(cloudId);
       renderFileHistory(ddId,modeFilter);
+    });
+  });
+}
+
+// Per-property history dropdown for comparison mode.
+// Shows only ANALYZER sessions of the current platform.
+// Clicking a session loads its data into the given property slot (prop object).
+async function renderPropHistory(ddId,prop){
+  const dd=document.getElementById(ddId);
+  dd.innerHTML='<div class="file-hist-sync">⟳ Loading...</div>';
+  let allSessions=[];
+  try{
+    const r=await fetch('/api/sessions?platform='+encodeURIComponent(PLATFORM));
+    if(r.ok)allSessions=await r.json();
+  }catch(e){console.warn('Failed to load sessions:',e);}
+  const sessions=allSessions.filter(s=>
+    s.mode==='analyzer'
+  );
+  if(!sessions.length){
+    dd.innerHTML='<div class="file-hist-empty">No saved '+(PLATFORM==='asset'?'Asset Management':'Operational')+' analyses</div>';
+    return;
+  }
+  dd.innerHTML=sessions.map((s,i)=>{
+    const d=new Date(s.savedAt);
+    const dateStr=d.toLocaleDateString()+" "+d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+    const loc=[s.city,s.state].filter(Boolean).join(", ");
+    return '<div class="file-hist-item" data-sidx="'+i+'">'
+      +'<div class="file-hist-name">📊 '+s.fileName+'</div>'
+      +'<div class="file-hist-meta">'+dateStr+' · '+s.monthCount+' months'+(loc?' · '+loc:'')+'</div>'
+      +'</div>';
+  }).join("");
+  dd.querySelectorAll(".file-hist-item").forEach(item=>{
+    item.addEventListener("click",async function(e){
+      e.stopPropagation();
+      const idx=parseInt(this.dataset.sidx);
+      let session=sessions[idx];if(!session)return;
+      dd.classList.add("hidden");
+      // Decompress if needed
+      if(session._chunked&&session.chunkCount){
+        try{
+          const r=await fetch('/api/sessions?chunksFor='+encodeURIComponent(session._cloudId));
+          const chunkRows=await r.json();
+          chunkRows.sort((a,b)=>a.chunkIdx-b.chunkIdx);
+          const fullB64=chunkRows.map(c=>c.chunkData).join('');
+          const payload=await gunzipB64(fullB64);
+          session={...session,...payload};
+        }catch(err){console.error('Failed to load session chunks',err);}
+      }else if(session._compressed&&session._payload){
+        try{const p=await gunzipB64(session._payload);session={...session,...p};}
+        catch(err){console.error('Failed to decompress session',err);}
+      }
+      // Load into property slot
+      prop.data=session.data||null;
+      prop.results=session.results||null;
+      const nameEl=document.getElementById(`compName_${prop.id}`);if(nameEl)nameEl.value=session.fileName||'';
+      const stEl=document.getElementById(`compState_${prop.id}`);if(stEl)stEl.value=session.state||'';
+      const ctEl=document.getElementById(`compCity_${prop.id}`);if(ctEl)ctEl.value=session.city||'';
+      const ppEl=document.getElementById(`compPP_${prop.id}`);if(ppEl)ppEl.value=session.price?session.price.toLocaleString():'0';
+      const tpEl=document.getElementById(`compType_${prop.id}`);if(tpEl)tpEl.value=session.propType||'';
+      const btn=document.querySelector(`#compProp_${prop.id} .comp-prop-fields .btn`);
+      if(btn)btn.textContent='✓ '+session.fileName;
+      checkCompReady();
     });
   });
 }
