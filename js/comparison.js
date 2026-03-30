@@ -39,6 +39,15 @@ function runComp(){
   }
 
   let aligned;
+  // Reconstruct raw metrics from saved results for properties loaded via Analyzer session history.
+  // p.data.metrics may be an empty stub when DATA was null at save time; p.results has the
+  // full analysis. Rebuild metrics so alignMultiData has real months+values to work with.
+  compProperties.forEach(p=>{
+    if(p.data&&!p.data.metrics?.length&&p.sliced?.months&&p.results?.length){
+      p.data.months=p.sliced.months;
+      p.data.metrics=p.results.map(r=>({name:r.name,values:r.res.map(x=>x.v),isIncome:r.isInc,section:r.sec}));
+    }
+  });
   try{aligned=alignMultiData(compProperties);}catch(ex){document.getElementById("compError").textContent=ex.message;document.getElementById("compError").style.display="";return;}
 
   const commonMonths=aligned[0].alignedData.months;
@@ -52,9 +61,9 @@ function runComp(){
   aligned.forEach(p=>{
     const sl=isFullRange?p.alignedData:sliceData(p.alignedData,fi,Math.min(ti,maxTo));
     p.sliced=sl;
-    // If metrics are empty (stub data from a session loaded via history) but results
-    // were already restored from that session, keep them rather than overwriting with [].
-    if(!sl.metrics||!sl.metrics.length){return;}
+    // Safety net: if metrics are still empty after reconstruction attempt but saved results
+    // exist, keep the saved results rather than overwriting with [].
+    if(p.results&&p.results.length&&!p.data?.metrics?.length){return;}
     const pp=getP(`compPP_${p.id}`);
     const engine=PLATFORM==="asset"?analyzeAsset:analyze;
     p.results=sl.metrics.map(m=>engine(m.name,m.values,sl.months,m.isIncome,pp,sk)).filter(Boolean);
