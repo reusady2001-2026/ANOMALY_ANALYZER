@@ -428,6 +428,8 @@ async function renderPropHistory(ddId,prop){
       // checkCompReady() passes (runComp uses prop.results directly, not prop.data.metrics)
       liveProp.data=session.data||(session.sliced?{months:session.sliced.months,metrics:[]}:null);
       liveProp.results=session.results||null;
+      // Diagnostic: log what was set (liveProp.sliced is intentionally NOT set here — logging its absence)
+      console.log('[renderPropHistory] loaded into prop',liveProp.id,'{data:',!!liveProp.data,'metricsLen:',liveProp.data?.metrics?.length??'N/A','sessionSlicedMonths:',session.sliced?.months?.length??'MISSING','livePropSliced:',!!liveProp.sliced,'resultsLen:',liveProp.results?.length??0,'}');
       const nameEl=document.getElementById(`compName_${prop.id}`);if(nameEl)nameEl.value=session.fileName||'';
       const stEl=document.getElementById(`compState_${prop.id}`);if(stEl)stEl.value=session.state||'';
       const ctEl=document.getElementById(`compCity_${prop.id}`);if(ctEl)ctEl.value=session.city||'';

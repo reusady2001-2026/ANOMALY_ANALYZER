@@ -25,16 +25,19 @@ function alignMultiData(props){
 }
 
 function runComp(){
+  console.log('[runComp] START — compProperties:',compProperties.map(p=>({id:p.id,hasData:!!p.data,metricsLen:p.data?.metrics?.length??'N/A',hasResults:!!p.results,resultsLen:p.results?.length??0,hasSliced:!!p.sliced,slicedMonths:p.sliced?.months?.length??0})));
   const ready=compProperties.filter(p=>p.data||p.results);
-  if(ready.length<2)return;
+  console.log('[runComp] ready:',ready.length,'of',compProperties.length);
+  if(ready.length<2){console.log('[runComp] EXIT: ready.length<2');return;}
   // Validate
   for(const p of compProperties){
     const pp=getP(`compPP_${p.id}`);
     const st=document.getElementById(`compState_${p.id}`)?.value;
     const ct=document.getElementById(`compCity_${p.id}`)?.value;
-    if(pp<=0){alert(`Enter Purchase Price for Property ${p.label}`);return;}
-    if(!st){alert(`Select State for Property ${p.label}`);return;}
-    if(!ct){alert(`Enter City for Property ${p.label}`);return;}
+    console.log(`[runComp] validate prop ${p.label}: pp=${pp} st="${st}" ct="${ct}"`);
+    if(pp<=0){console.log('[runComp] EXIT: pp<=0 for',p.label);alert(`Enter Purchase Price for Property ${p.label}`);return;}
+    if(!st){console.log('[runComp] EXIT: no state for',p.label);alert(`Select State for Property ${p.label}`);return;}
+    if(!ct){console.log('[runComp] EXIT: no city for',p.label);alert(`Enter City for Property ${p.label}`);return;}
     if(pp>0)savePriceToHistory(pp);
   }
 
@@ -43,12 +46,21 @@ function runComp(){
   // p.data.metrics may be an empty stub when DATA was null at save time; p.results has the
   // full analysis. Rebuild metrics so alignMultiData has real months+values to work with.
   compProperties.forEach(p=>{
-    if(p.data&&!p.data.metrics?.length&&p.sliced?.months&&p.results?.length){
+    const willReconstruct=p.data&&!p.data.metrics?.length&&p.sliced?.months&&p.results?.length;
+    console.log(`[runComp] reconstruct prop ${p.label}: willReconstruct=${willReconstruct} (data=${!!p.data} metricsLen=${p.data?.metrics?.length??'N/A'} slicedMonths=${p.sliced?.months?.length??'N/A'} resultsLen=${p.results?.length??0})`);
+    if(willReconstruct){
       p.data.months=p.sliced.months;
       p.data.metrics=p.results.map(r=>({name:r.name,values:r.res.map(x=>x.v),isIncome:r.isInc,section:r.sec}));
+      console.log(`[runComp] reconstructed ${p.data.metrics.length} metrics for prop ${p.label}`);
     }
   });
-  try{aligned=alignMultiData(compProperties);}catch(ex){document.getElementById("compError").textContent=ex.message;document.getElementById("compError").style.display="";return;}
+  try{
+    aligned=alignMultiData(compProperties);
+    console.log('[runComp] alignMultiData OK — commonMonths:',aligned[0]?.alignedData?.months?.length,'metricsPerProp:',aligned.map(p=>p.alignedData?.metrics?.length));
+  }catch(ex){
+    console.log('[runComp] EXIT: alignMultiData threw:',ex.message);
+    document.getElementById("compError").textContent=ex.message;document.getElementById("compError").style.display="";return;
+  }
 
   const commonMonths=aligned[0].alignedData.months;
   populatePeriod("compPeriodFrom","compPeriodTo",commonMonths);
