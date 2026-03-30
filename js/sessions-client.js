@@ -429,6 +429,7 @@ async function renderPropHistory(ddId,prop){
       liveProp.data=session.data||(session.sliced?{months:session.sliced.months,metrics:[]}:null);
       liveProp.results=session.results||null;
       liveProp.sliced=session.sliced||null;
+      console.log('[RPH] loaded prop',liveProp.label,'id=',liveProp.id,'{data:',!!liveProp.data,'dataMonths:',liveProp.data?.months?.length??'null','dataMetrics:',liveProp.data?.metrics?.length??'null','results:',liveProp.results?.length??'null','sliced:',!!liveProp.sliced,'slicedMonths:',liveProp.sliced?.months?.length??'null','state:',session.state||'EMPTY','city:',session.city||'EMPTY','price:',session.price??0,'}');
       const nameEl=document.getElementById(`compName_${prop.id}`);if(nameEl)nameEl.value=session.fileName||'';
       const stEl=document.getElementById(`compState_${prop.id}`);if(stEl)stEl.value=session.state||'';
       const ctEl=document.getElementById(`compCity_${prop.id}`);if(ctEl)ctEl.value=session.city||'';
