@@ -139,62 +139,10 @@ function renderComp(){
   months.forEach((m,i)=>thead+=`<th class="${i>=months.length-csk&&csk>0?"skip-col":""}" style="font-size:8px;">${m}</th>`);
   thead+=`<th class="trend-col">Trend</th><th class="trend-col">12M</th><th class="trend-col">3M</th><th class="quarter-col">Str Q</th><th class="quarter-col">Wk Q</th></tr></thead>`;
 
-  const mergedRows=[];
-  merged.forEach(m=>{
-    const propIds=aligned.filter(p=>m.entries[p.id]).map(p=>p);
-    propIds.forEach(p=>{
-      const r=m.entries[p.id];
-      if(!r)return;
-      if(CVIEW!=="all"&&CVIEW!==p.label.toLowerCase())return;
-      const lc=r.sec==="income"?"income-label":"expense-label";
-      mergedRows.push(`<tr style="background:${p.color}11;"><td class="metric-cell ${lc}" style="background:${p.color}18;">${r.name}</td><td class="type-cell"><span class="src-badge" style="background:${p.color}">${p.label}</span></td><td class="type-cell">${r.mt==="sporadic"?"SPR":"CNT"}</td>${renderCells(r,COMP_MAT_FOCUS)}<td class="trend-cell">${trendHTML(r.tr.all)}</td><td class="trend-cell">${trendHTML(r.tr.m12)}</td><td class="trend-cell">${trendHTML(r.tr.m3)}</td><td class="q-cell">${r.sq?r.sq.k:"—"}</td><td class="q-cell">${r.wq?r.wq.k:"—"}</td></tr>`);
-    });
-
-    // Delta row: show % difference between first two properties
-    if(propIds.length>=2&&CVIEW==="all"){
-      const rA=m.entries[propIds[0].id];
-      const rB=m.entries[propIds[1].id];
-      if(rA&&rB){
-        let deltaH=`<tr class="row-delta" style="background:rgba(139,92,246,0.06);"><td class="metric-cell" style="color:var(--purple);font-style:italic;font-size:9px;background:rgba(139,92,246,0.08);">Δ%</td><td class="type-cell"></td><td class="type-cell"></td>`;
-        const activeMonths=[];
-        for(let i=0;i<months.length;i++){
-          const skip=i>=months.length-csk&&csk>0;
-          if(!skip)activeMonths.push(i);
-        }
-        // Compute deltas
-        const deltas=[];
-        for(let i=0;i<months.length;i++){
-          const vA=rA.res[i]?.v;
-          const vB=rB.res[i]?.v;
-          const skip=i>=months.length-csk&&csk>0;
-          if(skip||vA==null||vB==null){deltas.push(null);continue;}
-          if(vB===0&&vA===0){deltas.push(0);continue;}
-          if(vB===0){deltas.push(null);continue;}
-          deltas.push(((vA-vB)/Math.abs(vB))*100);
-        }
-        // Stats for outlier detection
-        const validDeltas=deltas.filter(d=>d!==null);
-        const dMean=validDeltas.length?validDeltas.reduce((a,b)=>a+b,0)/validDeltas.length:0;
-        const dSD=validDeltas.length>1?Math.sqrt(validDeltas.reduce((a,v)=>a+(v-dMean)**2,0)/validDeltas.length):0;
-
-        for(let i=0;i<months.length;i++){
-          const skip=i>=months.length-csk&&csk>0;
-          const d=deltas[i];
-          if(skip){deltaH+=`<td class="delta-cell cell-skip">—</td>`;continue;}
-          if(d===null){deltaH+=`<td class="delta-cell">—</td>`;continue;}
-          const isOutlier=dSD>0&&Math.abs((d-dMean)/dSD)>1.5;
-          const col=d>0?"var(--green)":d<0?"var(--red)":"var(--text-muted)";
-          deltaH+=`<td class="delta-cell${isOutlier?" delta-outlier":""}" style="color:${col}">${d>=0?"+":""}${d.toFixed(1)}%</td>`;
-        }
-        deltaH+=`<td class="delta-cell"></td><td class="delta-cell"></td><td class="delta-cell"></td><td class="delta-cell"></td><td class="delta-cell"></td></tr>`;
-        mergedRows.push(deltaH);
-      }
-    }
-  });
-
-  const totalRows=mergedRows.length;
-  if(totalRows>200){
-    statsH+=`<div style="padding:8px 0;font-size:10px;color:var(--orange);">⚠ ${totalRows} rows — use Anomalies or Material filter for best performance.</div>`;
+  // Warn before rendering — estimate without generating any HTML
+  const estRows=merged.length*(aligned.length+(CVIEW==="all"?1:0));
+  if(estRows>200){
+    statsH+=`<div style="padding:8px 0;font-size:10px;color:var(--orange);">⚠ ~${estRows} rows — use Anomalies or Material filter for best performance.</div>`;
     document.getElementById("compStats").innerHTML=statsH;
   }
 
@@ -203,23 +151,68 @@ function renderComp(){
   const sentinel=document.createElement('tr');
   sentinel.id='compSentinel';
   sentinel.innerHTML=`<td colspan="999" style="height:1px;"></td>`;
-  const BATCH=80;
-  window._compMergedRows=mergedRows;
-  window._compRendered=0;
+  const BATCH=40; // metrics per frame — each metric generates 2-3 rows
+
+  // Build HTML for a single metric entry (prop rows + delta row).
+  // Called inside requestAnimationFrame so heavy renderCells() work is deferred.
+  function buildMetricRows(m){
+    const rows=[];
+    const propIds=aligned.filter(p=>m.entries[p.id]);
+    propIds.forEach(p=>{
+      const r=m.entries[p.id];
+      if(!r)return;
+      if(CVIEW!=="all"&&CVIEW!==p.label.toLowerCase())return;
+      const lc=r.sec==="income"?"income-label":"expense-label";
+      rows.push(`<tr style="background:${p.color}11;"><td class="metric-cell ${lc}" style="background:${p.color}18;">${r.name}</td><td class="type-cell"><span class="src-badge" style="background:${p.color}">${p.label}</span></td><td class="type-cell">${r.mt==="sporadic"?"SPR":"CNT"}</td>${renderCells(r,COMP_MAT_FOCUS)}<td class="trend-cell">${trendHTML(r.tr.all)}</td><td class="trend-cell">${trendHTML(r.tr.m12)}</td><td class="trend-cell">${trendHTML(r.tr.m3)}</td><td class="q-cell">${r.sq?r.sq.k:"—"}</td><td class="q-cell">${r.wq?r.wq.k:"—"}</td></tr>`);
+    });
+    // Delta row: % difference between first two properties
+    if(propIds.length>=2&&CVIEW==="all"){
+      const rA=m.entries[propIds[0].id];
+      const rB=m.entries[propIds[1].id];
+      if(rA&&rB){
+        let deltaH=`<tr class="row-delta" style="background:rgba(139,92,246,0.06);"><td class="metric-cell" style="color:var(--purple);font-style:italic;font-size:9px;background:rgba(139,92,246,0.08);">Δ%</td><td class="type-cell"></td><td class="type-cell"></td>`;
+        const deltas=[];
+        for(let i=0;i<months.length;i++){
+          const vA=rA.res[i]?.v;const vB=rB.res[i]?.v;
+          const skip=i>=months.length-csk&&csk>0;
+          if(skip||vA==null||vB==null){deltas.push(null);continue;}
+          if(vB===0&&vA===0){deltas.push(0);continue;}
+          if(vB===0){deltas.push(null);continue;}
+          deltas.push(((vA-vB)/Math.abs(vB))*100);
+        }
+        const validDeltas=deltas.filter(d=>d!==null);
+        const dMean=validDeltas.length?validDeltas.reduce((a,b)=>a+b,0)/validDeltas.length:0;
+        const dSD=validDeltas.length>1?Math.sqrt(validDeltas.reduce((a,v)=>a+(v-dMean)**2,0)/validDeltas.length):0;
+        for(let i=0;i<months.length;i++){
+          const skip=i>=months.length-csk&&csk>0;const d=deltas[i];
+          if(skip){deltaH+=`<td class="delta-cell cell-skip">—</td>`;continue;}
+          if(d===null){deltaH+=`<td class="delta-cell">—</td>`;continue;}
+          const isOutlier=dSD>0&&Math.abs((d-dMean)/dSD)>1.5;
+          const col=d>0?"var(--green)":d<0?"var(--red)":"var(--text-muted)";
+          deltaH+=`<td class="delta-cell${isOutlier?" delta-outlier":""}" style="color:${col}">${d>=0?"+":""}${d.toFixed(1)}%</td>`;
+        }
+        deltaH+=`<td class="delta-cell"></td><td class="delta-cell"></td><td class="delta-cell"></td><td class="delta-cell"></td><td class="delta-cell"></td></tr>`;
+        rows.push(deltaH);
+      }
+    }
+    return rows;
+  }
 
   function renderNextBatch(){
-    const rows=window._compMergedRows;
     const start=window._compRendered;
-    if(start>=rows.length){sentinel.remove();return;}
+    if(start>=merged.length){sentinel.remove();return;}
     if(sentinel.parentNode)sentinel.remove();
     requestAnimationFrame(()=>{
+      const rowHtml=[];
+      const end=Math.min(start+BATCH,merged.length);
+      for(let i=start;i<end;i++)rowHtml.push(...buildMetricRows(merged[i]));
       const frag=document.createDocumentFragment();
       const tmp=document.createElement('tbody');
-      tmp.innerHTML=rows.slice(start,start+BATCH).join('');
+      tmp.innerHTML=rowHtml.join('');
       while(tmp.firstChild)frag.appendChild(tmp.firstChild);
       tbody.appendChild(frag);
-      window._compRendered=start+BATCH;
-      if(window._compRendered<rows.length)tbody.appendChild(sentinel);
+      window._compRendered=end;
+      if(window._compRendered<merged.length)tbody.appendChild(sentinel);
     });
   }
 
@@ -232,7 +225,7 @@ function renderComp(){
 
   renderNextBatch();
   requestAnimationFrame(()=>{
-    if(window._compRendered<mergedRows.length){
+    if(window._compRendered<merged.length){
       tbody.appendChild(sentinel);
       observer.observe(sentinel);
     }
