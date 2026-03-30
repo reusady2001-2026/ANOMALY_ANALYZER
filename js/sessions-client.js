@@ -80,22 +80,30 @@ async function _postToCloud(body){
   try{
     const r=await fetch('/api/sessions',{method:'POST',
       headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-    if(!r.ok){const e=await r.text();console.error('Cloud push error',r.status,e);}
-  }catch(e){console.warn('Cloud push failed:',e);}
+    if(!r.ok){const e=await r.text();console.error('Cloud push error',r.status,e);return false;}
+    return true;
+  }catch(e){console.warn('Cloud push failed:',e);return false;}
 }
 // Coalescing save queue: only one pushSessionToCloud runs at a time.
 // If a new save is requested while one is active, the new session replaces
 // the pending one so the LAST (most recent) state always wins.
-let _pendingSession=null,_pushActive=false;
+// Waiters (e.g. the save button) receive the final ok/fail result via callbacks.
+let _pendingSession=null,_pushActive=false,_pushDoneCallbacks=[];
 async function pushSessionToCloud(session){
   _pendingSession=session;
-  if(_pushActive)return;
+  if(_pushActive){
+    return new Promise(resolve=>_pushDoneCallbacks.push(resolve));
+  }
   _pushActive=true;
+  let lastOk=true;
   while(_pendingSession){
     const s=_pendingSession;_pendingSession=null;
-    await _pushSessionImpl(s);
+    lastOk=await _pushSessionImpl(s);
   }
   _pushActive=false;
+  _pushDoneCallbacks.forEach(cb=>cb(lastOk));
+  _pushDoneCallbacks=[];
+  return lastOk;
 }
 async function _pushSessionImpl(session){
   const{results,reasonResults,aiCache,chatHistory,months,sliced,
@@ -104,20 +112,21 @@ async function _pushSessionImpl(session){
                  properties,compReasonResults,data};
   let gzBytes;
   try{gzBytes=await objToGzipBytes(payload);}
-  catch(e){console.error('Session compression failed:',e);return;}
+  catch(e){console.error('Session compression failed:',e);return false;}
   const b64=u8ToB64(gzBytes);
   // Split into ≤700KB chunks so each D1 row stays under the 1MB limit
   const MAX=700000;
   if(b64.length<=MAX){
-    await _postToCloud({...meta,_compressed:true,_payload:b64});
+    return await _postToCloud({...meta,_compressed:true,_payload:b64});
   }else{
     const chunks=[];
     for(let i=0;i<b64.length;i+=MAX)chunks.push(b64.slice(i,i+MAX));
-    await _postToCloud({...meta,_chunked:true,chunkCount:chunks.length});
+    if(!await _postToCloud({...meta,_chunked:true,chunkCount:chunks.length}))return false;
     for(let i=0;i<chunks.length;i++){
-      await _postToCloud({id:meta.id+'@@'+i,_isChunk:true,
-        sessionId:meta.id,chunkIdx:i,chunkData:chunks[i]});
+      if(!await _postToCloud({id:meta.id+'@@'+i,_isChunk:true,
+        sessionId:meta.id,chunkIdx:i,chunkData:chunks[i]}))return false;
     }
+    return true;
   }
 }
 async function deleteSessionFromCloud(id){
@@ -150,7 +159,7 @@ function saveCurrentSession(fileName){
     chatHistory:chatHistory||[],
     aiCache:window._aiCache||{},
   };
-  pushSessionToCloud(session);
+  return pushSessionToCloud(session);
 }
 
 function saveCompSession(){
@@ -182,7 +191,7 @@ function saveCompSession(){
     chatHistory:chatHistory||[],
     aiCache:window._aiCache||{},
   };
-  pushSessionToCloud(session);
+  return pushSessionToCloud(session);
 }
 
 function restoreSession(session){
@@ -280,8 +289,19 @@ async function renderFileHistory(ddId, modeFilter){
   let allSessions=[];
   try{
     const r=await fetch('/api/sessions?platform='+encodeURIComponent(PLATFORM));
-    if(r.ok)allSessions=await r.json();
-  }catch(e){console.warn('Failed to load sessions:',e);}
+    if(r.ok){
+      allSessions=await r.json();
+    }else{
+      const errText=await r.text().catch(()=>r.status);
+      console.error('Session listing failed:',r.status,errText);
+      dd.innerHTML='<div class="file-hist-empty" style="color:var(--red)">Error loading sessions ('+r.status+')</div>';
+      return;
+    }
+  }catch(e){
+    console.warn('Failed to load sessions:',e);
+    dd.innerHTML='<div class="file-hist-empty" style="color:var(--red)">Connection error — check network</div>';
+    return;
+  }
   const sessions=allSessions.filter(s=>!modeFilter||s.mode===modeFilter);
   if(!sessions.length){dd.innerHTML='<div class="file-hist-empty">No recent '+(modeFilter==='comparison'?'comparisons':'analyses')+'</div>';return;}
   dd.innerHTML=sessions.map((s,i)=>{
@@ -336,8 +356,19 @@ async function renderPropHistory(ddId,prop){
   let allSessions=[];
   try{
     const r=await fetch('/api/sessions?platform='+encodeURIComponent(PLATFORM));
-    if(r.ok)allSessions=await r.json();
-  }catch(e){console.warn('Failed to load sessions:',e);}
+    if(r.ok){
+      allSessions=await r.json();
+    }else{
+      const errText=await r.text().catch(()=>r.status);
+      console.error('Session listing failed:',r.status,errText);
+      dd.innerHTML='<div class="file-hist-empty" style="color:var(--red)">Error loading sessions ('+r.status+')</div>';
+      return;
+    }
+  }catch(e){
+    console.warn('Failed to load sessions:',e);
+    dd.innerHTML='<div class="file-hist-empty" style="color:var(--red)">Connection error — check network</div>';
+    return;
+  }
   const sessions=allSessions.filter(s=>
     s.mode==='analyzer'
   );

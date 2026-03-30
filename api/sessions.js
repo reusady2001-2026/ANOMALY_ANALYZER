@@ -22,10 +22,24 @@ module.exports = async function handler(req, res) {
     return res.status(500).json({ error: "Cloudflare D1 not configured" });
   }
 
-  // Auto-migration: add platform column if it doesn't exist yet
+  // Ensure table exists
+  await d1(
+    `CREATE TABLE IF NOT EXISTS sessions (
+       id TEXT PRIMARY KEY,
+       file_name TEXT,
+       mode TEXT,
+       platform TEXT NOT NULL DEFAULT 'operational',
+       saved_at TEXT,
+       session_data TEXT
+     )`
+  );
+  // Auto-migration: add platform column for databases created before this column existed
   try {
     await d1("ALTER TABLE sessions ADD COLUMN platform TEXT NOT NULL DEFAULT 'operational'");
-  } catch (e) { /* column already exists — ignore */ }
+  } catch (e) {
+    // Ignore only "duplicate column" / "already exists" errors
+    if (!e.message.includes("duplicate column") && !e.message.includes("already exists")) throw e;
+  }
 
   try {
     if (req.method === "GET") {
@@ -53,7 +67,8 @@ module.exports = async function handler(req, res) {
       const sessions = rows.map(row => {
         let data = {};
         try { data = JSON.parse(row.session_data); } catch (e) {}
-        return { ...data, _cloudId: row.id };
+        const { _payload, ...meta } = data;
+        return { ...meta, _cloudId: row.id };
       });
       return res.status(200).json(sessions);
     }

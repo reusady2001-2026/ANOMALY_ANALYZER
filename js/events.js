@@ -40,17 +40,29 @@ document.getElementById("compFileHistBtn").addEventListener("click",function(e){
   }
 });
 // Save session buttons
-document.getElementById("saveSessionBtn").addEventListener("click",function(){
+document.getElementById("saveSessionBtn").addEventListener("click",async function(){
   if(!RESULTS){alert("Run analysis first");return;}
-  saveCurrentSession(window._currentFileName||"analysis");
-  this.textContent="✓ Saved!";this.style.background="var(--green)";this.style.color="#000";this.style.borderColor="var(--green)";
-  setTimeout(()=>{this.textContent="💾 Save";this.style.background="";this.style.color="";this.style.borderColor="";},2000);
+  this.textContent="⏳ Saving…";this.disabled=true;
+  const ok=await saveCurrentSession(window._currentFileName||"analysis");
+  this.disabled=false;
+  if(ok){
+    this.textContent="✓ Saved!";this.style.background="var(--green)";this.style.color="#000";this.style.borderColor="var(--green)";
+  }else{
+    this.textContent="✗ Save failed";this.style.background="var(--red)";this.style.color="#fff";this.style.borderColor="var(--red)";
+  }
+  setTimeout(()=>{this.textContent="💾 Save";this.style.background="";this.style.color="";this.style.borderColor="";},3000);
 });
-document.getElementById("compSaveSessionBtn").addEventListener("click",function(){
+document.getElementById("compSaveSessionBtn").addEventListener("click",async function(){
   if(!window._compAligned){alert("Run comparison first");return;}
-  saveCompSession();
-  this.textContent="✓ Saved!";this.style.background="var(--green)";this.style.color="#000";this.style.borderColor="var(--green)";
-  setTimeout(()=>{this.textContent="💾 Save";this.style.background="";this.style.color="";this.style.borderColor="";},2000);
+  this.textContent="⏳ Saving…";this.disabled=true;
+  const ok=await saveCompSession();
+  this.disabled=false;
+  if(ok){
+    this.textContent="✓ Saved!";this.style.background="var(--green)";this.style.color="#000";this.style.borderColor="var(--green)";
+  }else{
+    this.textContent="✗ Save failed";this.style.background="var(--red)";this.style.color="#fff";this.style.borderColor="var(--red)";
+  }
+  setTimeout(()=>{this.textContent="💾 Save";this.style.background="";this.style.color="";this.style.borderColor="";},3000);
 });
 document.getElementById("rerunBtn").addEventListener("click",runAnalysis);
 document.getElementById("periodFrom").addEventListener("change",runAnalysis);
