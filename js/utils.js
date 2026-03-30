@@ -137,6 +137,7 @@ function addCompProperty(){
     });
   }
 
+  checkCompReady();
   return prop;
 }
 

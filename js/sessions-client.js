@@ -247,6 +247,7 @@ function restoreCompSession(session){
       const btn=card.querySelector(".comp-prop-fields .btn");if(btn)btn.textContent="✓ "+sp.name;
     }else{console.error("[RestoreComp] Card not found for prop",prop.id);}
   });
+  checkCompReady();
   // Rebuild aligned structure
   window._compAligned=session.properties.map((sp,i)=>{
     const cp=compProperties[i];
