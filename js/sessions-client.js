@@ -19,18 +19,43 @@ function sessionId(fileName,mode){
   return `${a}-${b.slice(0,4)}-4${b.slice(4,7)}-8${a.slice(0,3)}-${b}${a.slice(0,4)}`;
 }
 
-// Compress payload to gzip bytes using native JSON.stringify for maximum speed.
+// Compress payload to gzip bytes. writeVal streams the object graph into 256KB
+// string buffers which are encoded and queued, then written to CompressionStream
+// concurrently with reading to avoid back-pressure deadlock.
 async function objToGzipBytes(obj){
-  const json=JSON.stringify(obj);
-  const bytes=new TextEncoder().encode(json);
+  const enc=new TextEncoder();
   const cs=new CompressionStream('gzip');
-  const writer=cs.writable.getWriter();
-  const parts=[];
-  const reader=cs.readable.getReader();
-  // Write and read concurrently to avoid back-pressure deadlock.
-  const writeAll=(async()=>{await writer.write(bytes);await writer.close();})();
-  const readAll=(async()=>{for(;;){const{done,value}=await reader.read();if(done)break;parts.push(value);}})();
-  await Promise.all([writeAll,readAll]);
+  const w=cs.writable.getWriter();
+  const CHUNK=262144;
+  let buf="";
+  const pending=[];
+  function flush(){if(!buf.length)return;pending.push(enc.encode(buf));buf="";}
+  function emit(s){buf+=s;if(buf.length>=CHUNK)flush();}
+  function writeVal(val){
+    if(val===null||val===undefined){emit('null');return;}
+    if(typeof val==='number'||typeof val==='boolean'){emit(typeof val==='number'&&!isFinite(val)?'null':String(val));return;}
+    if(typeof val==='string'){emit(JSON.stringify(val));return;}
+    if(Array.isArray(val)){
+      emit('[');
+      for(let i=0;i<val.length;i++){if(i)emit(',');writeVal(val[i]);}
+      emit(']');return;
+    }
+    emit('{');let f=true;
+    for(const[k,v]of Object.entries(val)){
+      if(v===undefined)continue;
+      if(!f)emit(',');
+      emit(JSON.stringify(k)+':');
+      writeVal(v);
+      f=false;
+    }
+    emit('}');
+  }
+  writeVal(obj);flush();
+  const parts=[];const rd=cs.readable.getReader();
+  await Promise.all([
+    (async()=>{for(const chunk of pending)await w.write(chunk);await w.close();})(),
+    (async()=>{for(;;){const{done,value}=await rd.read();if(done)break;parts.push(value);}})()
+  ]);
   const tot=parts.reduce((s,c)=>s+c.length,0);
   const out=new Uint8Array(tot);let off=0;
   for(const c of parts){out.set(c,off);off+=c.length;}
