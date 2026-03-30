@@ -7,6 +7,7 @@ function alignMultiData(props){
   // Find common months across ALL properties
   let common=null;
   props.forEach(p=>{
+    if(!p.data||!p.data.months)throw new Error(`Property ${p.label} has no month data. Please re-upload the file.`);
     const ms=new Set(p.data.months);
     if(!common)common=ms;
     else common=new Set([...common].filter(m=>ms.has(m)));
@@ -25,19 +26,16 @@ function alignMultiData(props){
 }
 
 function runComp(){
-  console.log('[RC1] runComp fired. compProperties:',compProperties.map(p=>({id:p.id,label:p.label,data:!!p.data,metricsLen:p.data?.metrics?.length??'null',results:p.results?.length??'null',sliced:!!p.sliced,slicedMonths:p.sliced?.months?.length??'null'})));
   const ready=compProperties.filter(p=>p.data||p.results);
-  console.log('[RC2] ready props:',ready.length,'of',compProperties.length);
-  if(ready.length<2){console.log('[RC2X] EXIT ready<2');return;}
+  if(ready.length<2){return;}
   // Validate
   for(const p of compProperties){
     const pp=getP(`compPP_${p.id}`);
     const st=document.getElementById(`compState_${p.id}`)?.value;
     const ct=document.getElementById(`compCity_${p.id}`)?.value;
-    console.log(`[RC3] prop ${p.label}: pp=${pp} st="${st}" ct="${ct}"`);
-    if(pp<=0){console.log('[RC3X] EXIT pp<=0');alert(`Enter Purchase Price for Property ${p.label}`);return;}
-    if(!st){console.log('[RC3X] EXIT no state');alert(`Select State for Property ${p.label}`);return;}
-    if(!ct){console.log('[RC3X] EXIT no city');alert(`Enter City for Property ${p.label}`);return;}
+    if(pp<=0){alert(`Enter Purchase Price for Property ${p.label}`);return;}
+    if(!st){alert(`Select State for Property ${p.label}`);return;}
+    if(!ct){alert(`Enter City for Property ${p.label}`);return;}
     if(pp>0)savePriceToHistory(pp);
   }
 
@@ -47,18 +45,14 @@ function runComp(){
   // full analysis. Rebuild metrics so alignMultiData has real months+values to work with.
   compProperties.forEach(p=>{
     const willReconstruct=p.data&&!p.data.metrics?.length&&p.sliced?.months&&p.results?.length;
-    console.log(`[RC4] reconstruct ${p.label}: will=${willReconstruct} data=${!!p.data} metrics=${p.data?.metrics?.length??'null'} slicedMo=${p.sliced?.months?.length??'null'} results=${p.results?.length??'null'}`);
     if(willReconstruct){
       p.data.months=p.sliced.months;
       p.data.metrics=p.results.map(r=>({name:r.name,values:r.res.map(x=>x.v),isIncome:r.isInc,section:r.sec}));
-      console.log('[RC4R] reconstructed',p.data.metrics.length,'metrics for',p.label);
     }
   });
   try{
     aligned=alignMultiData(compProperties);
-    console.log('[RC5] alignMultiData OK — commonMonths:',aligned[0]?.alignedData?.months?.length,'metrics:',aligned.map(p=>p.alignedData?.metrics?.length));
   }catch(ex){
-    console.log('[RC5X] alignMultiData THREW:',ex.message,ex.stack);
     document.getElementById("compError").textContent=ex.message;document.getElementById("compError").style.display="";return;
   }
 
@@ -70,24 +64,18 @@ function runComp(){
   const isFullRange=(fi===0&&ti>=maxTo);
   const sk=isFullRange?SKIP:0;
 
-  console.log('[RC6] fi=',fi,'ti=',ti,'maxTo=',maxTo,'isFullRange=',isFullRange,'sk=',sk);
   aligned.forEach(p=>{
     const sl=isFullRange?p.alignedData:sliceData(p.alignedData,fi,Math.min(ti,maxTo));
     p.sliced=sl;
-    console.log(`[RC7] prop ${p.label}: sliced months=${sl?.months?.length} metrics=${sl?.metrics?.length}`);
     // Safety net: if metrics are still empty after reconstruction attempt but saved results
     // exist, keep the saved results rather than overwriting with [].
-    const safetyNet=p.results&&p.results.length&&!p.data?.metrics?.length;
-    console.log(`[RC7B] prop ${p.label}: safetyNet=${safetyNet} existingResults=${p.results?.length??'null'} dataMetrics=${p.data?.metrics?.length??'null'}`);
-    if(safetyNet){console.log('[RC7B] keeping saved results for',p.label);return;}
+    if(p.results&&p.results.length&&!p.data?.metrics?.length){return;}
     const pp=getP(`compPP_${p.id}`);
     const engine=PLATFORM==="asset"?analyzeAsset:analyze;
     p.results=sl.metrics.map(m=>engine(m.name,m.values,sl.months,m.isIncome,pp,sk)).filter(Boolean);
-    console.log(`[RC7C] re-analyzed ${p.label}: ${p.results.length} results`);
   });
 
   window._compAligned=aligned;window._compSkip=sk;
-  console.log('[RC8] calling renderComp()');
   renderComp();
   // Show chat bar for comparison too
   document.getElementById("chatBar").classList.remove("hidden");
@@ -101,9 +89,7 @@ function runComp(){
 }
 
 function renderComp(){
-  const aligned=window._compAligned;
-  console.log('[RCR] renderComp — aligned:',aligned?.length,'first sliced months:',aligned?.[0]?.sliced?.months?.length,'first results:',aligned?.[0]?.results?.length);
-  if(!aligned||!aligned.length){console.log('[RCRX] EXIT no aligned');return;}
+  const aligned=window._compAligned;if(!aligned||!aligned.length)return;
   ["compFilters","compStats","compLegend","compTableWrap"].forEach(id=>document.getElementById(id).classList.remove("hidden"));
   document.getElementById("compLegend").innerHTML=PLATFORM==="asset"
     ?'<span class="legend-item"><span class="legend-box" style="background:#b91c1c;"></span> Material ↓</span><span class="legend-item"><span class="legend-box" style="background:#15803d;"></span> Material ↑</span><span class="legend-item"><span class="legend-box" style="background:#b45309;"></span> Seasonal</span><span class="legend-item"><span class="src-badge src-a">A</span> / <span class="src-badge src-b">B</span> Source</span>'

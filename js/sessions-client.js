@@ -424,12 +424,12 @@ async function renderPropHistory(ddId,prop){
       // Load into property slot
       // Re-resolve the live reference in case compProperties was mutated during the async fetch
       const liveProp=compProperties.find(p=>p.id===prop.id)||prop;
-      // Use session.data if present; if null but sliced exists, build a minimal stub so
-      // checkCompReady() passes (runComp uses prop.results directly, not prop.data.metrics)
-      liveProp.data=session.data||(session.sliced?{months:session.sliced.months,metrics:[]}:null);
+      // Build month list: prefer session.sliced, fall back to top-level session.months (present in
+      // all saved sessions including legacy ones that predate the meta/payload split).
+      const sessionMonths=session.sliced?.months||session.months||null;
+      liveProp.data=session.data||(sessionMonths?{months:sessionMonths,metrics:[]}:null);
       liveProp.results=session.results||null;
-      liveProp.sliced=session.sliced||null;
-      console.log('[RPH] loaded prop',liveProp.label,'id=',liveProp.id,'{data:',!!liveProp.data,'dataMonths:',liveProp.data?.months?.length??'null','dataMetrics:',liveProp.data?.metrics?.length??'null','results:',liveProp.results?.length??'null','sliced:',!!liveProp.sliced,'slicedMonths:',liveProp.sliced?.months?.length??'null','state:',session.state||'EMPTY','city:',session.city||'EMPTY','price:',session.price??0,'}');
+      liveProp.sliced=session.sliced||(sessionMonths?{months:sessionMonths}:null);
       const nameEl=document.getElementById(`compName_${prop.id}`);if(nameEl)nameEl.value=session.fileName||'';
       const stEl=document.getElementById(`compState_${prop.id}`);if(stEl)stEl.value=session.state||'';
       const ctEl=document.getElementById(`compCity_${prop.id}`);if(ctEl)ctEl.value=session.city||'';
