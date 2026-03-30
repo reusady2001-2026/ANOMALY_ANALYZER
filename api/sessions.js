@@ -43,6 +43,17 @@ module.exports = async function handler(req, res) {
 
   try {
     if (req.method === "GET") {
+      // Fetch a single full session by id (includes _payload for decompression)
+      if (req.query.id && !req.query.chunksFor) {
+        const rows = await d1(
+          "SELECT session_data FROM sessions WHERE id = ?",
+          [req.query.id]
+        );
+        if (!rows.length) return res.status(404).json({ error: "Not found" });
+        let data = {};
+        try { data = JSON.parse(rows[0].session_data); } catch (e) {}
+        return res.status(200).json({ ...data, _cloudId: req.query.id });
+      }
       // Serve chunk rows for a specific session (used when restoring chunked sessions)
       if (req.query.chunksFor) {
         const rows = await d1(
