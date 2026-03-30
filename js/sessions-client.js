@@ -106,20 +106,10 @@ async function _pushSessionImpl(session){
   const payload={results,reasonResults,aiCache,chatHistory,months,sliced,
                  properties,compReasonResults,data};
 
-  const t1=performance.now();
-  let jsonStr;
-  try{jsonStr=JSON.stringify(payload);}catch(e){console.error('[Save] JSON.stringify failed:',e);return false;}
-  console.log('[Save] JSON.stringify done:',(performance.now()-t1).toFixed(0)+'ms','size:',(jsonStr.length/1024).toFixed(0)+'KB');
-
-  const t2=performance.now();
   let gzBytes;
   try{gzBytes=await objToGzipBytes(payload);}catch(e){console.error('[Save] compress failed:',e);return false;}
-  console.log('[Save] gzip done:',(performance.now()-t2).toFixed(0)+'ms','compressed:',(gzBytes.length/1024).toFixed(0)+'KB');
-
-  const t3=performance.now();
   const b64=u8ToB64(gzBytes);
-  console.log('[Save] b64 done:',(performance.now()-t3).toFixed(0)+'ms','b64 size:',(b64.length/1024).toFixed(0)+'KB');
-  console.log('[Save] total before network:',(performance.now()-t0).toFixed(0)+'ms');
+  console.log('[Save] compressed:',(gzBytes.length/1024).toFixed(0)+'KB b64:',(b64.length/1024).toFixed(0)+'KB total:',(performance.now()-t0).toFixed(0)+'ms');
 
   // Split into ≤700KB chunks so each D1 row stays under the 1MB limit
   const MAX=700000;
