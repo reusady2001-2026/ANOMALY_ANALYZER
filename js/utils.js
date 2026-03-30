@@ -151,7 +151,7 @@ function relabelCompProperties(){
 }
 
 function checkCompReady(){
-  const allHaveData=compProperties.length>=2&&compProperties.every(p=>p.data);
+  const allHaveData=compProperties.length>=2&&compProperties.every(p=>p.data||p.results);
   document.getElementById("compRunBtn").classList.toggle("hidden",!allHaveData);
 }
 
