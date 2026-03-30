@@ -19,47 +19,17 @@ function sessionId(fileName,mode){
   return `${a}-${b.slice(0,4)}-4${b.slice(4,7)}-8${a.slice(0,3)}-${b}${a.slice(0,4)}`;
 }
 
-// Compress payload to gzip bytes. writeVal is synchronous and emits into a
-// 64KB string buffer; the buffer is encoded+queued in bulk, then written to
-// the CompressionStream in large chunks. This avoids both:
-//  • RangeError from one huge JSON.stringify call on a large nested object
-//  • Flooding the stream with 100 000+ tiny w.write() calls (which allocates
-//    as many Promises/Uint8Arrays synchronously, freezing the tab for 30+ s).
+// Compress payload to gzip bytes using native JSON.stringify for maximum speed.
 async function objToGzipBytes(obj){
-  const enc=new TextEncoder();
+  const json=JSON.stringify(obj);
+  const bytes=new TextEncoder().encode(json);
   const cs=new CompressionStream('gzip');
-  const w=cs.writable.getWriter();
-  const CHUNK=65536;
-  let buf="";
-  const pending=[];
-  function flush(){if(!buf.length)return;pending.push(enc.encode(buf));buf="";}
-  function emit(s){buf+=s;if(buf.length>=CHUNK)flush();}
-  function writeVal(val){
-    if(val===null||val===undefined){emit('null');return;}
-    if(typeof val==='number'||typeof val==='boolean'){emit(typeof val==='number'&&!isFinite(val)?'null':String(val));return;}
-    if(typeof val==='string'){emit(JSON.stringify(val));return;}
-    if(Array.isArray(val)){
-      emit('[');
-      for(let i=0;i<val.length;i++){if(i)emit(',');writeVal(val[i]);}
-      emit(']');return;
-    }
-    emit('{');let f=true;
-    for(const[k,v]of Object.entries(val)){
-      if(v===undefined)continue;
-      if(!f)emit(',');
-      emit(JSON.stringify(k)+':');
-      writeVal(v);
-      f=false;
-    }
-    emit('}');
-  }
-  writeVal(obj);flush();
-  // Write and read concurrently — prevents back-pressure deadlock on large payloads.
-  // If writes happen before reads start, the stream's internal buffer fills and
-  // the writer stalls waiting for the reader, hanging the entire async chain.
-  const parts=[];const rd=cs.readable.getReader();
-  const writeAll=(async()=>{for(const chunk of pending)await w.write(chunk);await w.close();})();
-  const readAll=(async()=>{for(;;){const{done,value}=await rd.read();if(done)break;parts.push(value);}})();
+  const writer=cs.writable.getWriter();
+  const parts=[];
+  const reader=cs.readable.getReader();
+  // Write and read concurrently to avoid back-pressure deadlock.
+  const writeAll=(async()=>{await writer.write(bytes);await writer.close();})();
+  const readAll=(async()=>{for(;;){const{done,value}=await reader.read();if(done)break;parts.push(value);}})();
   await Promise.all([writeAll,readAll]);
   const tot=parts.reduce((s,c)=>s+c.length,0);
   const out=new Uint8Array(tot);let off=0;
@@ -87,36 +57,45 @@ async function _postToCloud(body){
     return true;
   }catch(e){console.warn('Cloud push failed:',e);return false;}
 }
-// Coalescing save queue: only one pushSessionToCloud runs at a time.
-// If a new save is requested while one is active, the new session replaces
-// the pending one so the LAST (most recent) state always wins.
-// Waiters (e.g. the save button) receive the final ok/fail result via callbacks.
-let _pendingSession=null,_pushActive=false,_pushDoneCallbacks=[];
-async function pushSessionToCloud(session){
+// Coalescing save queue with 2 s debounce. Rapid successive saves (e.g. from
+// period filter changes) collapse into one network round-trip. The explicit
+// Save button bypasses debounce by calling _pushSessionImpl directly.
+let _pendingSession=null,_pushActive=false,_saveDebounceTimer=null;
+function pushSessionToCloud(session){
   _pendingSession=session;
-  if(_pushActive){
-    return new Promise(resolve=>_pushDoneCallbacks.push(resolve));
-  }
-  _pushActive=true;
-  let lastOk=true;
-  while(_pendingSession){
-    const s=_pendingSession;_pendingSession=null;
-    lastOk=await _pushSessionImpl(s);
-  }
-  _pushActive=false;
-  _pushDoneCallbacks.forEach(cb=>cb(lastOk));
-  _pushDoneCallbacks=[];
-  return lastOk;
+  clearTimeout(_saveDebounceTimer);
+  _saveDebounceTimer=setTimeout(async()=>{
+    if(_pushActive)return;
+    _pushActive=true;
+    while(_pendingSession){
+      const s=_pendingSession;_pendingSession=null;
+      await _pushSessionImpl(s);
+    }
+    _pushActive=false;
+  },2000);
 }
 async function _pushSessionImpl(session){
+  const t0=performance.now();
   const{results,reasonResults,aiCache,chatHistory,months,sliced,
         properties,compReasonResults,data,...meta}=session;
   const payload={results,reasonResults,aiCache,chatHistory,months,sliced,
                  properties,compReasonResults,data};
+
+  const t1=performance.now();
+  let jsonStr;
+  try{jsonStr=JSON.stringify(payload);}catch(e){console.error('[Save] JSON.stringify failed:',e);return false;}
+  console.log('[Save] JSON.stringify done:',(performance.now()-t1).toFixed(0)+'ms','size:',(jsonStr.length/1024).toFixed(0)+'KB');
+
+  const t2=performance.now();
   let gzBytes;
-  try{gzBytes=await objToGzipBytes(payload);}
-  catch(e){console.error('Session compression failed:',e);return false;}
+  try{gzBytes=await objToGzipBytes(payload);}catch(e){console.error('[Save] compress failed:',e);return false;}
+  console.log('[Save] gzip done:',(performance.now()-t2).toFixed(0)+'ms','compressed:',(gzBytes.length/1024).toFixed(0)+'KB');
+
+  const t3=performance.now();
   const b64=u8ToB64(gzBytes);
+  console.log('[Save] b64 done:',(performance.now()-t3).toFixed(0)+'ms','b64 size:',(b64.length/1024).toFixed(0)+'KB');
+  console.log('[Save] total before network:',(performance.now()-t0).toFixed(0)+'ms');
+
   // Split into ≤700KB chunks so each D1 row stays under the 1MB limit
   const MAX=700000;
   if(b64.length<=MAX){
@@ -124,12 +103,13 @@ async function _pushSessionImpl(session){
   }else{
     const chunks=[];
     for(let i=0;i<b64.length;i+=MAX)chunks.push(b64.slice(i,i+MAX));
+    // Header row first (must exist before chunks are written)
     if(!await _postToCloud({...meta,_chunked:true,chunkCount:chunks.length}))return false;
-    for(let i=0;i<chunks.length;i++){
-      if(!await _postToCloud({id:meta.id+'@@'+i,_isChunk:true,
-        sessionId:meta.id,chunkIdx:i,chunkData:chunks[i]}))return false;
-    }
-    return true;
+    // Chunk rows are independent — send in parallel
+    const results2=await Promise.all(chunks.map((chunkData,i)=>
+      _postToCloud({id:meta.id+'@@'+i,_isChunk:true,sessionId:meta.id,chunkIdx:i,chunkData})
+    ));
+    return results2.every(Boolean);
   }
 }
 async function deleteSessionFromCloud(id){
@@ -162,7 +142,8 @@ function saveCurrentSession(fileName){
     chatHistory:chatHistory||[],
     aiCache:window._aiCache||{},
   };
-  return pushSessionToCloud(session);
+  // Bypass debounce — explicit save button needs a real success/failure result.
+  return _pushSessionImpl(session);
 }
 
 function saveCompSession(){
@@ -194,7 +175,8 @@ function saveCompSession(){
     chatHistory:chatHistory||[],
     aiCache:window._aiCache||{},
   };
-  return pushSessionToCloud(session);
+  // Bypass debounce — explicit save button needs a real success/failure result.
+  return _pushSessionImpl(session);
 }
 
 function restoreSession(session){
