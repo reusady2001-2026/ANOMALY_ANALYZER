@@ -26,7 +26,7 @@ function alignMultiData(props){
 
 function runComp(){
   const ready=compProperties.filter(p=>p.data||p.results);
-  if(ready.length<2)return;
+  if(ready.length<2){return;}
   // Validate
   for(const p of compProperties){
     const pp=getP(`compPP_${p.id}`);
@@ -43,12 +43,17 @@ function runComp(){
   // p.data.metrics may be an empty stub when DATA was null at save time; p.results has the
   // full analysis. Rebuild metrics so alignMultiData has real months+values to work with.
   compProperties.forEach(p=>{
-    if(p.data&&!p.data.metrics?.length&&p.sliced?.months&&p.results?.length){
+    const willReconstruct=p.data&&!p.data.metrics?.length&&p.sliced?.months&&p.results?.length;
+    if(willReconstruct){
       p.data.months=p.sliced.months;
       p.data.metrics=p.results.map(r=>({name:r.name,values:r.res.map(x=>x.v),isIncome:r.isInc,section:r.sec}));
     }
   });
-  try{aligned=alignMultiData(compProperties);}catch(ex){document.getElementById("compError").textContent=ex.message;document.getElementById("compError").style.display="";return;}
+  try{
+    aligned=alignMultiData(compProperties);
+  }catch(ex){
+    document.getElementById("compError").textContent=ex.message;document.getElementById("compError").style.display="";return;
+  }
 
   const commonMonths=aligned[0].alignedData.months;
   populatePeriod("compPeriodFrom","compPeriodTo",commonMonths);
