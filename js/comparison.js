@@ -25,7 +25,7 @@ function alignMultiData(props){
 }
 
 function runComp(){
-  const ready=compProperties.filter(p=>p.data);
+  const ready=compProperties.filter(p=>p.data||p.results);
   if(ready.length<2)return;
   // Validate
   for(const p of compProperties){
@@ -51,10 +51,13 @@ function runComp(){
 
   aligned.forEach(p=>{
     const sl=isFullRange?p.alignedData:sliceData(p.alignedData,fi,Math.min(ti,maxTo));
+    p.sliced=sl;
+    // If metrics are empty (stub data from a session loaded via history) but results
+    // were already restored from that session, keep them rather than overwriting with [].
+    if(!sl.metrics||!sl.metrics.length){return;}
     const pp=getP(`compPP_${p.id}`);
     const engine=PLATFORM==="asset"?analyzeAsset:analyze;
     p.results=sl.metrics.map(m=>engine(m.name,m.values,sl.months,m.isIncome,pp,sk)).filter(Boolean);
-    p.sliced=sl;
   });
 
   window._compAligned=aligned;window._compSkip=sk;
