@@ -74,6 +74,21 @@ async function gunzipB64(b64){
   const w=ds.writable.getWriter();w.write(u8);w.close();
   return JSON.parse(await new Response(ds.readable).text());
 }
+// Feed chunks one-at-a-time into the DecompressionStream to avoid allocating
+// one giant concatenated base64 string (which OOMs on large sessions).
+async function gunzipChunked(chunkRows){
+  chunkRows.sort((a,b)=>a.chunkIdx-b.chunkIdx);
+  const ds=new DecompressionStream('gzip');
+  const writer=ds.writable.getWriter();
+  for(const chunk of chunkRows){
+    const bin=atob(chunk.chunkData);
+    const u8=new Uint8Array(bin.length);
+    for(let i=0;i<bin.length;i++)u8[i]=bin.charCodeAt(i);
+    await writer.write(u8);
+  }
+  await writer.close();
+  return JSON.parse(await new Response(ds.readable).text());
+}
 async function _postToCloud(body){
   try{
     const r=await fetch('/api/sessions',{method:'POST',
@@ -324,9 +339,7 @@ async function renderFileHistory(ddId, modeFilter){
         try{
           const r=await fetch('/api/sessions?chunksFor='+encodeURIComponent(session._cloudId));
           const chunkRows=await r.json();
-          chunkRows.sort((a,b)=>a.chunkIdx-b.chunkIdx);
-          const fullB64=chunkRows.map(c=>c.chunkData).join('');
-          const payload=await gunzipB64(fullB64);
+          const payload=await gunzipChunked(chunkRows);
           session={...session,...payload};
         }catch(err){console.error('Failed to load session chunks',err);}
       }else if(session._compressed){
@@ -403,9 +416,7 @@ async function renderPropHistory(ddId,prop){
         try{
           const r=await fetch('/api/sessions?chunksFor='+encodeURIComponent(session._cloudId));
           const chunkRows=await r.json();
-          chunkRows.sort((a,b)=>a.chunkIdx-b.chunkIdx);
-          const fullB64=chunkRows.map(c=>c.chunkData).join('');
-          const payload=await gunzipB64(fullB64);
+          const payload=await gunzipChunked(chunkRows);
           session={...session,...payload};
         }catch(err){console.error('Failed to load session chunks',err);}
       }else if(session._compressed){
