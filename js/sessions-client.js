@@ -422,8 +422,12 @@ async function renderPropHistory(ddId,prop){
         }catch(err){console.error('Failed to decompress session',err);}
       }
       // Load into property slot
-      prop.data=session.data||null;
-      prop.results=session.results||null;
+      // Re-resolve the live reference in case compProperties was mutated during the async fetch
+      const liveProp=compProperties.find(p=>p.id===prop.id)||prop;
+      // Use session.data if present; if null but sliced exists, build a minimal stub so
+      // checkCompReady() passes (runComp uses prop.results directly, not prop.data.metrics)
+      liveProp.data=session.data||(session.sliced?.months?.length?{months:session.sliced.months,metrics:[]}:null);
+      liveProp.results=session.results||null;
       const nameEl=document.getElementById(`compName_${prop.id}`);if(nameEl)nameEl.value=session.fileName||'';
       const stEl=document.getElementById(`compState_${prop.id}`);if(stEl)stEl.value=session.state||'';
       const ctEl=document.getElementById(`compCity_${prop.id}`);if(ctEl)ctEl.value=session.city||'';
