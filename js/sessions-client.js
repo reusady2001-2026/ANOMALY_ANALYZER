@@ -54,10 +54,13 @@ async function objToGzipBytes(obj){
     emit('}');
   }
   writeVal(obj);flush();
-  for(const chunk of pending)await w.write(chunk);
-  await w.close();
+  // Write and read concurrently — prevents back-pressure deadlock on large payloads.
+  // If writes happen before reads start, the stream's internal buffer fills and
+  // the writer stalls waiting for the reader, hanging the entire async chain.
   const parts=[];const rd=cs.readable.getReader();
-  for(;;){const{done,value}=await rd.read();if(done)break;parts.push(value);}
+  const writeAll=(async()=>{for(const chunk of pending)await w.write(chunk);await w.close();})();
+  const readAll=(async()=>{for(;;){const{done,value}=await rd.read();if(done)break;parts.push(value);}})();
+  await Promise.all([writeAll,readAll]);
   const tot=parts.reduce((s,c)=>s+c.length,0);
   const out=new Uint8Array(tot);let off=0;
   for(const c of parts){out.set(c,off);off+=c.length;}
@@ -329,9 +332,16 @@ async function renderFileHistory(ddId, modeFilter){
           const payload=await gunzipB64(fullB64);
           session={...session,...payload};
         }catch(err){console.error('Failed to load session chunks',err);}
-      }else if(session._compressed&&session._payload){
-        try{const p=await gunzipB64(session._payload);session={...session,...p};}
-        catch(err){console.error('Failed to decompress session',err);}
+      }else if(session._compressed){
+        try{
+          // Listing responses omit _payload for bandwidth; fetch the full record by id.
+          let b64=session._payload;
+          if(!b64&&session._cloudId){
+            const r2=await fetch('/api/sessions?id='+encodeURIComponent(session._cloudId));
+            if(r2.ok){const full=await r2.json();b64=full._payload;}
+          }
+          if(b64){const p=await gunzipB64(b64);session={...session,...p};}
+        }catch(err){console.error('Failed to decompress session',err);}
       }
       if(session.mode==='comparison'){showMode("comp");restoreCompSession(session);}
       else{restoreSession(session);showMode("analyzer");}
@@ -401,9 +411,15 @@ async function renderPropHistory(ddId,prop){
           const payload=await gunzipB64(fullB64);
           session={...session,...payload};
         }catch(err){console.error('Failed to load session chunks',err);}
-      }else if(session._compressed&&session._payload){
-        try{const p=await gunzipB64(session._payload);session={...session,...p};}
-        catch(err){console.error('Failed to decompress session',err);}
+      }else if(session._compressed){
+        try{
+          let b64=session._payload;
+          if(!b64&&session._cloudId){
+            const r2=await fetch('/api/sessions?id='+encodeURIComponent(session._cloudId));
+            if(r2.ok){const full=await r2.json();b64=full._payload;}
+          }
+          if(b64){const p=await gunzipB64(b64);session={...session,...p};}
+        }catch(err){console.error('Failed to decompress session',err);}
       }
       // Load into property slot
       prop.data=session.data||null;
