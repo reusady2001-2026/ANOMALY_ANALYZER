@@ -89,6 +89,8 @@ function runComp(){
 }
 
 function renderComp(){
+  if(window._compObserver){window._compObserver.disconnect();window._compObserver=null;}
+  window._compMergedRows=[];window._compRendered=0;
   const aligned=window._compAligned;if(!aligned||!aligned.length)return;
   ["compFilters","compStats","compLegend","compTableWrap"].forEach(id=>document.getElementById(id).classList.remove("hidden"));
   document.getElementById("compLegend").innerHTML=PLATFORM==="asset"
@@ -133,10 +135,11 @@ function renderComp(){
 
   const months=aligned[0].sliced?aligned[0].sliced.months:aligned[0].alignedData.months;
   const csk=window._compSkip!=null?window._compSkip:SKIP;
-  let html=`<thead><tr><th class="metric-col">Metric</th><th class="src-col">Src</th><th class="type-col">Type</th>`;
-  months.forEach((m,i)=>html+=`<th class="${i>=months.length-csk&&csk>0?"skip-col":""}" style="font-size:8px;">${m}</th>`);
-  html+=`<th class="trend-col">Trend</th><th class="trend-col">12M</th><th class="trend-col">3M</th><th class="quarter-col">Str Q</th><th class="quarter-col">Wk Q</th></tr></thead><tbody>`;
+  let thead=`<thead><tr><th class="metric-col">Metric</th><th class="src-col">Src</th><th class="type-col">Type</th>`;
+  months.forEach((m,i)=>thead+=`<th class="${i>=months.length-csk&&csk>0?"skip-col":""}" style="font-size:8px;">${m}</th>`);
+  thead+=`<th class="trend-col">Trend</th><th class="trend-col">12M</th><th class="trend-col">3M</th><th class="quarter-col">Str Q</th><th class="quarter-col">Wk Q</th></tr></thead>`;
 
+  const mergedRows=[];
   merged.forEach(m=>{
     const propIds=aligned.filter(p=>m.entries[p.id]).map(p=>p);
     propIds.forEach(p=>{
@@ -144,7 +147,7 @@ function renderComp(){
       if(!r)return;
       if(CVIEW!=="all"&&CVIEW!==p.label.toLowerCase())return;
       const lc=r.sec==="income"?"income-label":"expense-label";
-      html+=`<tr style="background:${p.color}11;"><td class="metric-cell ${lc}" style="background:${p.color}18;">${r.name}</td><td class="type-cell"><span class="src-badge" style="background:${p.color}">${p.label}</span></td><td class="type-cell">${r.mt==="sporadic"?"SPR":"CNT"}</td>${renderCells(r,COMP_MAT_FOCUS)}<td class="trend-cell">${trendHTML(r.tr.all)}</td><td class="trend-cell">${trendHTML(r.tr.m12)}</td><td class="trend-cell">${trendHTML(r.tr.m3)}</td><td class="q-cell">${r.sq?r.sq.k:"—"}</td><td class="q-cell">${r.wq?r.wq.k:"—"}</td></tr>`;
+      mergedRows.push(`<tr style="background:${p.color}11;"><td class="metric-cell ${lc}" style="background:${p.color}18;">${r.name}</td><td class="type-cell"><span class="src-badge" style="background:${p.color}">${p.label}</span></td><td class="type-cell">${r.mt==="sporadic"?"SPR":"CNT"}</td>${renderCells(r,COMP_MAT_FOCUS)}<td class="trend-cell">${trendHTML(r.tr.all)}</td><td class="trend-cell">${trendHTML(r.tr.m12)}</td><td class="trend-cell">${trendHTML(r.tr.m3)}</td><td class="q-cell">${r.sq?r.sq.k:"—"}</td><td class="q-cell">${r.wq?r.wq.k:"—"}</td></tr>`);
     });
 
     // Delta row: show % difference between first two properties
@@ -184,12 +187,56 @@ function renderComp(){
           deltaH+=`<td class="delta-cell${isOutlier?" delta-outlier":""}" style="color:${col}">${d>=0?"+":""}${d.toFixed(1)}%</td>`;
         }
         deltaH+=`<td class="delta-cell"></td><td class="delta-cell"></td><td class="delta-cell"></td><td class="delta-cell"></td><td class="delta-cell"></td></tr>`;
-        html+=deltaH;
+        mergedRows.push(deltaH);
       }
     }
   });
 
-  html+=`</tbody>`;document.getElementById("compTable").innerHTML=html;
+  const totalRows=mergedRows.length;
+  if(totalRows>200){
+    statsH+=`<div style="padding:8px 0;font-size:10px;color:var(--orange);">⚠ ${totalRows} rows — use Anomalies or Material filter for best performance.</div>`;
+    document.getElementById("compStats").innerHTML=statsH;
+  }
+
+  document.getElementById("compTable").innerHTML=thead+`<tbody id="compTbody"></tbody>`;
+  const tbody=document.getElementById("compTbody");
+  const sentinel=document.createElement('tr');
+  sentinel.id='compSentinel';
+  sentinel.innerHTML=`<td colspan="999" style="height:1px;"></td>`;
+  const BATCH=80;
+  window._compMergedRows=mergedRows;
+  window._compRendered=0;
+
+  function renderNextBatch(){
+    const rows=window._compMergedRows;
+    const start=window._compRendered;
+    if(start>=rows.length){sentinel.remove();return;}
+    if(sentinel.parentNode)sentinel.remove();
+    requestAnimationFrame(()=>{
+      const frag=document.createDocumentFragment();
+      const tmp=document.createElement('tbody');
+      tmp.innerHTML=rows.slice(start,start+BATCH).join('');
+      while(tmp.firstChild)frag.appendChild(tmp.firstChild);
+      tbody.appendChild(frag);
+      window._compRendered=start+BATCH;
+      if(window._compRendered<rows.length)tbody.appendChild(sentinel);
+    });
+  }
+
+  const observer=new IntersectionObserver((entries)=>{
+    if(entries[0].isIntersecting)renderNextBatch();
+  },{rootMargin:'200px'});
+
+  if(window._compObserver)window._compObserver.disconnect();
+  window._compObserver=observer;
+
+  renderNextBatch();
+  requestAnimationFrame(()=>{
+    if(window._compRendered<mergedRows.length){
+      tbody.appendChild(sentinel);
+      observer.observe(sentinel);
+    }
+  });
 }
 
 function showTip(el,idx){const met=window._filt?.[idx];if(!met||!window._data)return;const d=window._data,t=document.getElementById("tooltip");t.className="tooltip-bar visible";t.innerHTML=`<span><strong>${met.name}</strong></span><span>Type: <strong>${met.mt}</strong></span><span>Threshold: <strong>${met.th.toFixed(2)}</strong></span><span>Norm.Vol: <strong>${met.nv.toFixed(2)}</strong></span><span>Opening: <strong>${d.months[met.oi]||"—"}</strong></span>`;}
@@ -226,6 +273,8 @@ function resetAll(){
   document.getElementById("compRunBtn").classList.add("hidden");
   ["compFilters","compStats","compLegend","compTableWrap"].forEach(id=>document.getElementById(id).classList.add("hidden"));
   document.getElementById("compTable").innerHTML="";
+  if(window._compObserver){window._compObserver.disconnect();window._compObserver=null;}
+  window._compMergedRows=[];window._compRendered=0;
   document.getElementById("compMatFocusBtn").className="btn";
   document.querySelectorAll("[data-cview]").forEach((b,i)=>b.className=i===0?"btn btn-active":"btn");
   document.querySelectorAll("[data-cfilt]").forEach((b,i)=>b.className=i===0?"btn btn-active":"btn");
