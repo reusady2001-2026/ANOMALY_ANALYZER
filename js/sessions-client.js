@@ -107,7 +107,7 @@ async function gunzipChunked(chunkRows){
 }
 async function _postToCloud(body){
   try{
-    const r=await fetch('/api/sessions',{method:'POST',
+    const r=await fetch('/api/sessions',{method:'POST',cache:'no-store',
       headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     if(!r.ok){const e=await r.text();console.error('Cloud push error',r.status,e);return false;}
     return true;
@@ -160,7 +160,7 @@ async function _pushSessionImpl(session){
 }
 async function deleteSessionFromCloud(id){
   if(!id)return;
-  try{await fetch('/api/sessions?id='+encodeURIComponent(id),{method:'DELETE'});}
+  try{await fetch('/api/sessions?id='+encodeURIComponent(id),{method:'DELETE',cache:'no-store'});}
   catch(e){console.warn('Cloud delete failed:',e);}
 }
 
@@ -321,7 +321,7 @@ async function renderFileHistory(ddId, modeFilter){
   dd.innerHTML='<div class="file-hist-sync">⟳ Loading...</div>';
   let allSessions=[];
   try{
-    const r=await fetch('/api/sessions?platform='+encodeURIComponent(PLATFORM));
+    const r=await fetch('/api/sessions?platform='+encodeURIComponent(PLATFORM),{cache:'no-store'});
     if(r.ok){
       allSessions=await r.json();
     }else{
@@ -355,7 +355,7 @@ async function renderFileHistory(ddId, modeFilter){
       if(session._chunked&&session.chunkCount){
         // Reassemble chunks then decompress
         try{
-          const r=await fetch('/api/sessions?chunksFor='+encodeURIComponent(session._cloudId));
+          const r=await fetch('/api/sessions?chunksFor='+encodeURIComponent(session._cloudId),{cache:'no-store'});
           const chunkRows=await r.json();
           const payload=await gunzipChunked(chunkRows);
           session={...session,...payload};
@@ -365,7 +365,7 @@ async function renderFileHistory(ddId, modeFilter){
           // Listing responses omit _payload for bandwidth; fetch the full record by id.
           let b64=session._payload;
           if(!b64&&session._cloudId){
-            const r2=await fetch('/api/sessions?id='+encodeURIComponent(session._cloudId));
+            const r2=await fetch('/api/sessions?id='+encodeURIComponent(session._cloudId),{cache:'no-store'});
             if(r2.ok){const full=await r2.json();b64=full._payload;}
           }
           if(b64){const p=await gunzipB64(b64);session={...session,...p};}
@@ -393,7 +393,7 @@ async function renderPropHistory(ddId,prop){
   dd.innerHTML='<div class="file-hist-sync">⟳ Loading...</div>';
   let allSessions=[];
   try{
-    const r=await fetch('/api/sessions?platform='+encodeURIComponent(PLATFORM));
+    const r=await fetch('/api/sessions?platform='+encodeURIComponent(PLATFORM),{cache:'no-store'});
     if(r.ok){
       allSessions=await r.json();
     }else{
@@ -432,7 +432,7 @@ async function renderPropHistory(ddId,prop){
       // Decompress if needed
       if(session._chunked&&session.chunkCount){
         try{
-          const r=await fetch('/api/sessions?chunksFor='+encodeURIComponent(session._cloudId));
+          const r=await fetch('/api/sessions?chunksFor='+encodeURIComponent(session._cloudId),{cache:'no-store'});
           const chunkRows=await r.json();
           const payload=await gunzipChunked(chunkRows);
           session={...session,...payload};
@@ -441,7 +441,7 @@ async function renderPropHistory(ddId,prop){
         try{
           let b64=session._payload;
           if(!b64&&session._cloudId){
-            const r2=await fetch('/api/sessions?id='+encodeURIComponent(session._cloudId));
+            const r2=await fetch('/api/sessions?id='+encodeURIComponent(session._cloudId),{cache:'no-store'});
             if(r2.ok){const full=await r2.json();b64=full._payload;}
           }
           if(b64){const p=await gunzipB64(b64);session={...session,...p};}
