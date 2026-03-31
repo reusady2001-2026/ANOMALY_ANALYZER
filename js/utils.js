@@ -183,6 +183,24 @@ function fz(z){if(z==null||isNaN(z))return"";return z.toFixed(2);}
 function fPct(n){if(n==null||isNaN(n))return"—";return(n>=0?"+":"")+n.toFixed(1)+"%";}
 
 function classify(v){const oi=v.findIndex(x=>x!==0);if(oi===-1)return{t:"skip",oi:-1};const zc=v.filter(x=>x===0).length;return(zc>v.length/2&&v.slice(oi+1).some(x=>x===0))?{t:"sporadic",oi}:{t:"continuous",oi};}
+// Scan full timeline for structural changes (≥6 consecutive triggers a phase flip).
+// Returns [{type,oi,end}, ...] — one entry per phase, contiguous, no gaps.
+function detectPhases(vals){
+  const cl=classify(vals);if(cl.t==="skip")return null;
+  const phases=[{type:cl.t,oi:cl.oi,end:vals.length-1}];
+  let cur=cl.t,consec=0,cStart=-1;
+  for(let i=cl.oi;i<vals.length;i++){
+    const v=vals[i];
+    if(cur==="sporadic"){
+      if(v!==0){if(consec===0)cStart=i;consec++;if(consec===6){phases[phases.length-1].end=cStart-1;phases.push({type:"continuous",oi:cStart,end:vals.length-1});cur="continuous";consec=0;cStart=-1;}}
+      else{consec=0;cStart=-1;}
+    }else{
+      if(v===0){if(consec===0)cStart=i;consec++;if(consec===6){phases[phases.length-1].end=cStart-1;phases.push({type:"sporadic",oi:cStart,end:vals.length-1});cur="sporadic";consec=0;cStart=-1;}}
+      else{consec=0;cStart=-1;}
+    }
+  }
+  return phases;
+}
 function normVol(v,oi){const a=v.slice(oi);if(a.length<2)return 0;const ch=[];for(let i=1;i<a.length;i++)ch.push(a[i]-a[i-1]);const s=sdev(ch),am=Math.abs(mn(a));return am===0?0:s/am;}
 function thresh(t,cv,nv){if(t==="continuous")return Math.max(FLOOR_C,LIN*nv);const m=mn(cv),s=sdev(cv);return Math.max(s===0?Infinity:Math.abs(m)/s,LIN*nv);}
 
@@ -190,6 +208,7 @@ function analyze(name,allV,months,isInc,pp,skip){
   if(skip===undefined)skip=SKIP;
   const matTh=(pp*0.001)/12,ae=allV.length-skip,vals=allV.slice(0,ae);
   if(!vals.length||allZ(vals))return null;const cl=classify(vals);if(cl.t==="skip")return null;
+  const phases=detectPhases(vals);if(phases&&phases.length>1)return analyzeStructural(name,allV,months,isInc,pp,skip,phases);
   const{t:mt,oi}=cl,cv=mt==="continuous"?vals.slice(oi):vals,nv=normVol(vals,mt==="continuous"?oi:0),th=thresh(mt,cv,nv);
   const chs=[];if(mt==="continuous"){for(let i=oi;i<vals.length;i++)chs.push(i===oi?{i,ch:0}:{i,ch:vals[i]-vals[i-1]});}
   const sdCh=mt==="continuous"?sdev(chs.filter((_,ci)=>ci>0).map(c=>c.ch)):0;
@@ -217,6 +236,84 @@ function analyze(name,allV,months,isInc,pp,skip){
   const qs={};if(fqs>=0&&lqe>=fqs){for(let i=fqs;i<=lqe;i++){const k=gq(i);if(k){if(!qs[k])qs[k]=0;qs[k]+=vals[i];}}}
   const qe=Object.entries(qs);let sq=null,wq=null;if(qe.length){sq=qe.reduce((a,b)=>b[1]>a[1]?b:a);wq=qe.reduce((a,b)=>b[1]<a[1]?b:a);}
   return{name,mt,oi,th,nv,res,tr:{all:tAll,m12:t12,m3:t3},sq:sq?{k:sq[0]}:null,wq:wq?{k:wq[0]}:null,isInc,sec:isInc?"income":"expense"};
+}
+
+// Multi-phase analysis for metrics with structural changes.
+// Each phase gets fresh calculations (z-scores, thresholds) starting from its opening month.
+function analyzeStructural(name,allV,months,isInc,pp,skip,phases){
+  if(skip===undefined)skip=SKIP;
+  const matTh=(pp*0.001)/12,ae=allV.length-skip,vals=allV.slice(0,ae);
+  // Pre-fill result array
+  const res=[];
+  for(let i=0;i<allV.length;i++){const v=allV[i];if(i>=ae)res.push({mi:i,v,z:null,st:"skip",at:null,mat:false,seas:false,recur:false,zm:null,chv:null});else res.push({mi:i,v,z:null,st:"pre",at:null,mat:false,seas:false,recur:false,zm:null,chv:null});}
+  // Analyse each phase independently
+  for(let pi=0;pi<phases.length;pi++){
+    const ph=phases[pi],pOi=ph.oi,pEnd=Math.min(ph.end,ae-1);
+    if(pEnd<pOi)continue;
+    const pVals=vals.slice(pOi,pEnd+1);
+    // For first sporadic phase include pre-opening zeros in cv (matches original sporadic behaviour)
+    const cv=pi===0&&ph.type==="sporadic"?vals.slice(0,pEnd+1):pVals;
+    const nv=normVol(pVals,0),th=thresh(ph.type,cv,nv);
+    // Mark all phase months as norm before potentially overwriting with anomalies
+    for(let i=pOi;i<=pEnd;i++)if(res[i].st==="pre")res[i]={...res[i],st:"norm"};
+    if(ph.type==="continuous"){
+      const chs=[];for(let i=pOi;i<=pEnd;i++)chs.push(i===pOi?{i,ch:0}:{i,ch:vals[i]-vals[i-1]});
+      const sdCh=sdev(chs.filter((_,ci)=>ci>0).map(c=>c.ch));
+      for(let i=pOi;i<=pEnd;i++){
+        const local=i-pOi;let z=0,det=false,zm=null;
+        if(local===0){z=0;zm="ch";}else{const ch=vals[i]-vals[i-1];z=sdCh===0?0:ch/sdCh;zm="ch";}
+        if(Math.abs(z)>th)det=true;
+        if(!det&&local>0){const vv=pVals.slice(0,local+1),m=mn(vv),s=sdev(vv);if(s>0){const zv=(pVals[local]-m)/s;if(Math.abs(zv)>th){z=zv;det=true;zm="val";}}}
+        const at=det?(isInc?z>0?"pos":"neg":z>0?"neg":"pos"):null;
+        const chv=local>0?vals[i]-vals[i-1]:null;
+        res[i]={mi:i,v:allV[i],z,st:det?"anom":"norm",at,mat:false,seas:false,recur:false,zm,chv};
+      }
+    }else{
+      // First sporadic phase starts from 0 to include pre-opening zeros (original behaviour)
+      const startIdx=pi===0?0:pOi;
+      const m=mn(cv),s=sdev(cv);
+      for(let i=startIdx;i<=pEnd;i++){
+        const v=allV[i];const z=s===0?0:(v-m)/s;const det=Math.abs(z)>th;
+        const at=det?(isInc?z>0?"pos":"neg":z>0?"neg":"pos"):null;
+        res[i]={mi:i,v,z,st:det?"anom":"norm",at,mat:false,seas:false,recur:false,zm:"val",chv:null};
+      }
+    }
+  }
+  // Reversion suppression
+  for(let i=1;i<res.length;i++){const p=res[i-1],c=res[i];if(p.st==="anom"&&c.st==="anom"&&p.zm==="ch"&&c.zm==="ch"&&((p.z>0&&c.z<0)||(p.z<0&&c.z>0))){c.st="norm";c.at=null;}}
+  // Materiality — per phase
+  for(let pi=0;pi<phases.length;pi++){
+    const ph=phases[pi],pOi=ph.oi,pEnd=Math.min(ph.end,ae-1);
+    const pVals=vals.slice(pOi,pEnd+1);
+    const cv=pi===0&&ph.type==="sporadic"?vals.slice(0,pEnd+1):pVals;
+    for(let i=pOi;i<=pEnd;i++){const r=res[i];if(r.st!=="anom")continue;const local=i-pOi;
+      if(ph.type==="continuous"){if(r.zm==="ch"&&r.chv!==null)r.mat=Math.abs(r.chv)>=matTh;else if(r.zm==="val"){const av=pVals.slice(0,local+1);r.mat=Math.abs(r.v-mn(av))>=matTh;}}
+      else r.mat=Math.abs(r.v-mn(cv))>=matTh;}
+  }
+  // Seasonality
+  const seasP=[];for(let i=0;i<res.length;i++){const r=res[i];if(!r.mat)continue;for(const ci of[i-12,i+12]){if(ci<0||ci>=res.length||ci<=i)continue;const o=res[ci];if(!o||!o.mat)continue;if(r.at!==o.at)continue;const rv=r.zm==="ch"?r.chv:r.v,ov=o.zm==="ch"?o.chv:o.v;if(rv==null||ov==null)continue;if(ov!==0&&Math.abs(rv/ov-1)<=STOL)seasP.push([i,ci]);}}
+  for(const[a,b]of seasP){res[a].seas=true;res[a].mat=false;res[a].st="seas";res[b].seas=true;res[b].mat=false;res[b].st="seas";}
+  // Recurrence
+  const recP=[];for(let i=0;i<res.length;i++){const r=res[i];if(r.st==="skip"||r.st==="pre"||r.seas)continue;for(const ci of[i-12,i+12]){if(ci<0||ci>=res.length||ci<=i)continue;const o=res[ci];if(!o||o.st==="skip"||o.st==="pre"||o.seas)continue;
+    const rph=phases.find(p=>i>=p.oi&&i<=p.end),oph=phases.find(p=>ci>=p.oi&&ci<=p.end);
+    const rv=rph&&rph.type==="continuous"?(r.chv!=null?r.chv:r.v):r.v;const ov=oph&&oph.type==="continuous"?(o.chv!=null?o.chv:o.v):o.v;
+    if(rv==null||ov==null||rv===0&&ov===0||ov===0)continue;if((rv>0)!==(ov>0))continue;if(Math.abs(rv/ov-1)<=STOL)recP.push([i,ci]);}}
+  for(const[a,b]of recP){res[a].recur=true;res[b].recur=true;}
+  // Trend from last phase
+  const lph=phases[phases.length-1],ts=lph.oi;
+  const tc=[];for(let i=ts;i<ae;i++)tc.push(i===ts?0:vals[i]-vals[i-1]);
+  const tAll=tc.reduce((a,b)=>a+b,0),t12=tc.slice(-12).reduce((a,b)=>a+b,0),t3c=tc.slice(-3).reduce((a,b)=>a+b,0);
+  // Quarters from last phase
+  const MS=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  const gq=mi=>{const s=months[mi];if(!s)return null;const p=s.split(" ");return`Q${Math.floor(MS.indexOf(p[0])/3)+1} ${p[1]}`;};
+  const gqm=mi=>{const s=months[mi];if(!s)return-1;return(MS.indexOf(s.split(" ")[0])%3)+1;};
+  let fqs=ts;const oiq=gqm(ts);if(oiq!==1)fqs=ts+(4-oiq);let lqe=ae-1;while(lqe>=0&&gqm(lqe)!==3)lqe--;
+  const qs={};if(fqs>=0&&lqe>=fqs){for(let i=fqs;i<=lqe;i++){const k=gq(i);if(k){if(!qs[k])qs[k]=0;qs[k]+=vals[i];}}}
+  const qe=Object.entries(qs);let sq=null,wq=null;if(qe.length){sq=qe.reduce((a,b)=>b[1]>a[1]?b:a);wq=qe.reduce((a,b)=>b[1]<a[1]?b:a);}
+  // th/nv from last phase for display
+  const lphVals=vals.slice(lph.oi,Math.min(lph.end,ae-1)+1);
+  const lastNv=normVol(lphVals,0),lastTh=thresh(lph.type,lphVals,lastNv);
+  return{name,mt:"structural-change",oi:phases[0].oi,th:lastTh,nv:lastNv,res,tr:{all:tAll,m12:t12,m3:t3c},sq:sq?{k:sq[0]}:null,wq:wq?{k:wq[0]}:null,isInc,sec:isInc?"income":"expense",phases};
 }
 
 function parseSheet(wb){
