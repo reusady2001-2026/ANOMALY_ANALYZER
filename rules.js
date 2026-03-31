@@ -492,7 +492,8 @@ const RuleEngine = (() => {
     return allResults.filter(r => r !== target).map(r => {
       const sim = jaccard(target.firedRuleIds, r.firedRuleIds);
       const dirMatch = Math.sign(target.effectiveZ) === Math.sign(r.effectiveZ);
-      return { ...r, similarity: Math.round(sim * (dirMatch ? 1 : 0.7) * 100) };
+      const similarity = Math.round(sim * (dirMatch ? 1 : 0.7) * 100);
+      return { key: r.metricName + '|||' + r.monthIdx, similarity, monthLabel: r.monthLabel };
     }).filter(r => r.similarity >= 50).sort((a,b) => b.similarity - a.similarity).slice(0,5);
   }
 
@@ -539,6 +540,7 @@ const RuleEngine = (() => {
             tier3: fired.filter(r => r.tier===TIER3).map(r => r.label),
             tier4: fired.filter(r => r.tier===TIER4).map(r => r.label),
           },
+          corroborating: [],
         };
 
         allResults.push(result);

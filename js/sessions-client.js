@@ -9,6 +9,22 @@ var reasonResults=null;
 var compReasonResults={}; // key: propertyId -> reasonResults
 var contextStatus="idle";
 
+// Expand {key,similarity,monthLabel} refs in corroborating back to full objects
+// (refs are stored to reduce payload; resolved on restore for UI access)
+function resolveCorroborating(rr){
+  if(!rr||!rr.lookup)return;
+  const lu=rr.lookup;
+  Object.values(lu).forEach(entry=>{
+    if(!Array.isArray(entry.corroborating)||!entry.corroborating.length)return;
+    if(entry.corroborating[0]&&entry.corroborating[0].metricName)return; // already full
+    entry.corroborating=entry.corroborating.map(ref=>{
+      if(!ref||!ref.key)return ref;
+      const full=lu[ref.key];
+      return full?{...full,similarity:ref.similarity,corroborating:[]}:ref;
+    });
+  });
+}
+
 // Deterministic ID based on fileName+mode so Supabase can upsert the same row
 function sessionId(fileName,mode){
   const s=PLATFORM+'\0'+mode+'\0'+fileName;
@@ -216,6 +232,7 @@ function restoreSession(session){
   DATA=session.data||null;RESULTS=session.results;
   window._sliced=session.sliced||(session.months?{months:session.months}:null);window._slicedSkip=session.slicedSkip||0;
   window.reasonResults=session.reasonResults||null;reasonResults=session.reasonResults||null;
+  resolveCorroborating(window.reasonResults);
   window._dataContext=session.dataContext||null;chatHistory=session.chatHistory||[];
   window._aiCache=session.aiCache||{};
   // Merge with localStorage backup in case cloud save was incomplete
@@ -252,6 +269,7 @@ function restoreCompSession(session){
   cachedContext=null;
   reasonResults=session.reasonResults||null;
   window.reasonResults=reasonResults;
+  resolveCorroborating(window.reasonResults);
   compReasonResults=session.compReasonResults||{};
   contextStatus=reasonResults&&reasonResults.lookup&&Object.keys(reasonResults.lookup).length>0?"done":"idle";
   // Rebuild comparison properties
