@@ -96,14 +96,17 @@ async function gunzipChunked(chunkRows){
   chunkRows.sort((a,b)=>a.chunkIdx-b.chunkIdx);
   const ds=new DecompressionStream('gzip');
   const writer=ds.writable.getWriter();
-  for(const chunk of chunkRows){
-    const bin=atob(chunk.chunkData);
-    const u8=new Uint8Array(bin.length);
-    for(let i=0;i<bin.length;i++)u8[i]=bin.charCodeAt(i);
-    await writer.write(u8);
-  }
-  await writer.close();
-  return JSON.parse(await new Response(ds.readable).text());
+  const writeAll=async()=>{
+    for(const chunk of chunkRows){
+      const bin=atob(chunk.chunkData);
+      const u8=new Uint8Array(bin.length);
+      for(let i=0;i<bin.length;i++)u8[i]=bin.charCodeAt(i);
+      await writer.write(u8);
+    }
+    await writer.close();
+  };
+  const [,text]=await Promise.all([writeAll(),new Response(ds.readable).text()]);
+  return JSON.parse(text);
 }
 async function _postToCloud(body){
   try{
