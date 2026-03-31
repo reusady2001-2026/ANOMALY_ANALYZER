@@ -24,6 +24,9 @@ function analyzeAsset(name, allV, months, isInc, pp, skip) {
   const cl = classify(vals);
   if (cl.t === "skip") return null;
 
+  const phases = detectPhases(vals);
+  if (phases && phases.length > 1) return analyzeAssetStructural(name, allV, months, isInc, pp, skip, phases);
+
   const { t: mt, oi } = cl;
   const cv = mt === "continuous" ? vals.slice(oi) : vals;
   const nv = normVol(vals, mt === "continuous" ? oi : 0);
@@ -126,4 +129,54 @@ function analyzeAsset(name, allV, months, isInc, pp, skip) {
     tr: { all: tAll, m12: t12, m3: t3c },
     sq: null, wq: null, isInc, sec: isInc ? "income" : "expense"
   };
+}
+
+// Multi-phase asset analysis for structural-change metrics.
+// Continuous phases use T3; sporadic phases use Z-score + cap-rate dual filter.
+function analyzeAssetStructural(name,allV,months,isInc,pp,skip,phases){
+  if(skip===undefined)skip=SKIP;
+  const matTh=pp*0.001,ae=allV.length-skip,vals=allV.slice(0,ae);
+  const res=[];
+  for(let i=0;i<allV.length;i++){const v=allV[i];if(i>=ae)res.push({mi:i,v,z:null,st:"skip",at:null,mat:false,seas:false,recur:false,zm:null,chv:null});else res.push({mi:i,v,z:null,st:"pre",at:null,mat:false,seas:false,recur:false,zm:null,chv:null});}
+  for(let pi=0;pi<phases.length;pi++){
+    const ph=phases[pi],pOi=ph.oi,pEnd=Math.min(ph.end,ae-1);
+    if(pEnd<pOi)continue;
+    for(let i=pOi;i<=pEnd;i++)if(res[i].st==="pre")res[i]={...res[i],st:"norm"};
+    if(ph.type==="continuous"){
+      // T3 method — requires 4 months from phase opening
+      for(let n=pOi+3;n<=pEnd;n++){
+        const T3=(vals[n]+vals[n-1]+vals[n-2])*4,T31=(vals[n-1]+vals[n-2]+vals[n-3])*4,diff=T3-T31;
+        if(Math.abs(diff)>=matTh){
+          const at=isInc?(diff>0?"pos":"neg"):(diff<0?"pos":"neg");
+          res[n]={mi:n,v:allV[n],z:diff/matTh,st:"anom",mat:true,at,seas:false,recur:false,zm:"t3",chv:diff};
+        }
+      }
+    }else{
+      // Z-score + cap-rate dual filter
+      const pVals=vals.slice(pOi,pEnd+1);
+      const cv=pi===0?vals.slice(0,pEnd+1):pVals;
+      const nv=normVol(pVals,0),th=thresh("sporadic",cv,nv);
+      const m=mn(cv),s=sdev(cv);
+      const startIdx=pi===0?0:pOi;
+      for(let i=startIdx;i<=pEnd;i++){
+        if(res[i].st==="skip")continue;
+        if(res[i].st==="pre")res[i]={...res[i],st:"norm"};
+        if(s>0){
+          const v=allV[i],z=(v-m)/s,capImpact=Math.abs(v)*12;
+          if(Math.abs(z)>th&&capImpact>=matTh){
+            const at=isInc?(z>0?"pos":"neg"):(z>0?"neg":"pos");
+            res[i]={mi:i,v,z,st:"anom",mat:true,at,seas:false,recur:false,zm:"val",chv:null};
+          }
+        }
+      }
+    }
+  }
+  // Seasonality
+  const seasP=[];for(let i=0;i<res.length;i++){const r=res[i];if(!r.mat)continue;for(const ci of[i-12,i+12]){if(ci<0||ci>=res.length||ci<=i)continue;const o=res[ci];if(!o||!o.mat)continue;if(r.at!==o.at)continue;const rv=(r.zm==="ch"||r.zm==="t3")?r.chv:r.v,ov=(o.zm==="ch"||o.zm==="t3")?o.chv:o.v;if(rv==null||ov==null)continue;if(ov!==0&&Math.abs(rv/ov-1)<=STOL)seasP.push([i,ci]);}}
+  for(const[a,b]of seasP){res[a].seas=true;res[a].mat=false;res[a].st="seas";res[b].seas=true;res[b].mat=false;res[b].st="seas";}
+  // Trend from last phase
+  const lph=phases[phases.length-1],ts=lph.oi;
+  const tc=[];for(let i=ts;i<ae;i++)tc.push(i===ts?0:vals[i]-vals[i-1]);
+  const tAll=tc.reduce((a,b)=>a+b,0),t12=tc.slice(-12).reduce((a,b)=>a+b,0),t3c=tc.slice(-3).reduce((a,b)=>a+b,0);
+  return{name,mt:"structural-change",oi:phases[0].oi,th:matTh,nv:0,res,tr:{all:tAll,m12:t12,m3:t3c},sq:null,wq:null,isInc,sec:isInc?"income":"expense",phases};
 }

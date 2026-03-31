@@ -163,7 +163,7 @@ function renderComp(){
       if(!r)return;
       if(CVIEW!=="all"&&CVIEW!==p.label.toLowerCase())return;
       const lc=r.sec==="income"?"income-label":"expense-label";
-      rows.push(`<tr style="background:${p.color}11;"><td class="metric-cell ${lc}" style="background:${p.color}18;">${r.name}</td><td class="type-cell"><span class="src-badge" style="background:${p.color}">${p.label}</span></td><td class="type-cell">${r.mt==="sporadic"?"SPR":"CNT"}</td>${renderCells(r,COMP_MAT_FOCUS)}<td class="trend-cell">${trendHTML(r.tr.all)}</td><td class="trend-cell">${trendHTML(r.tr.m12)}</td><td class="trend-cell">${trendHTML(r.tr.m3)}</td><td class="q-cell">${r.sq?r.sq.k:"—"}</td><td class="q-cell">${r.wq?r.wq.k:"—"}</td></tr>`);
+      rows.push(`<tr style="background:${p.color}11;"><td class="metric-cell ${lc}" style="background:${p.color}18;">${r.name}</td><td class="type-cell"><span class="src-badge" style="background:${p.color}">${p.label}</span></td><td class="type-cell">${r.mt==="sporadic"?"SPR":r.mt==="structural-change"?"STC":"CNT"}</td>${renderCells(r,COMP_MAT_FOCUS)}<td class="trend-cell">${trendHTML(r.tr.all)}</td><td class="trend-cell">${trendHTML(r.tr.m12)}</td><td class="trend-cell">${trendHTML(r.tr.m3)}</td><td class="q-cell">${r.sq?r.sq.k:"—"}</td><td class="q-cell">${r.wq?r.wq.k:"—"}</td></tr>`);
     });
     // Delta row: % difference between first two properties
     if(propIds.length>=2&&CVIEW==="all"){
@@ -232,7 +232,7 @@ function renderComp(){
   });
 }
 
-function showTip(el,idx){const met=window._filt?.[idx];if(!met||!window._data)return;const d=window._data,t=document.getElementById("tooltip");t.className="tooltip-bar visible";t.innerHTML=`<span><strong>${met.name}</strong></span><span>Type: <strong>${met.mt}</strong></span><span>Threshold: <strong>${met.th.toFixed(2)}</strong></span><span>Norm.Vol: <strong>${met.nv.toFixed(2)}</strong></span><span>Opening: <strong>${d.months[met.oi]||"—"}</strong></span>`;}
+function showTip(el,idx){const met=window._filt?.[idx];if(!met||!window._data)return;const d=window._data,t=document.getElementById("tooltip");t.className="tooltip-bar visible";t.innerHTML=`<span><strong>${met.name}</strong></span><span>Type: <strong>${met.mt==="structural-change"?"STC":met.mt}</strong></span><span>Threshold: <strong>${met.th.toFixed(2)}</strong></span><span>Norm.Vol: <strong>${met.nv.toFixed(2)}</strong></span><span>Opening: <strong>${d.months[met.oi]||"—"}</strong></span>`;}
 function hideTip(){document.getElementById("tooltip").className="tooltip-bar";}
 
 function resetAll(){
