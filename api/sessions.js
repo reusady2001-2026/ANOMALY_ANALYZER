@@ -41,6 +41,60 @@ module.exports = async function handler(req, res) {
     if (!e.message.includes("duplicate column") && !e.message.includes("already exists")) throw e;
   }
 
+  // rule_candidates table
+  await d1(
+    `CREATE TABLE IF NOT EXISTS rule_candidates (
+       id TEXT PRIMARY KEY,
+       metric_name TEXT,
+       section TEXT,
+       pattern_type TEXT,
+       pattern_description TEXT,
+       total_occurrences INTEGER DEFAULT 0,
+       occurrences_since_last_dismissal INTEGER DEFAULT 0,
+       distinct_properties TEXT,
+       distinct_property_count INTEGER DEFAULT 0,
+       status TEXT DEFAULT 'candidate',
+       dismissal_count INTEGER DEFAULT 0,
+       suggested_rules TEXT,
+       anomaly_history TEXT,
+       state_abbr TEXT,
+       updated_at TEXT
+     )`
+  );
+  for (const col of [
+    "metric_name TEXT", "section TEXT", "pattern_type TEXT", "pattern_description TEXT",
+    "total_occurrences INTEGER DEFAULT 0", "occurrences_since_last_dismissal INTEGER DEFAULT 0",
+    "distinct_properties TEXT", "distinct_property_count INTEGER DEFAULT 0",
+    "status TEXT DEFAULT 'candidate'", "dismissal_count INTEGER DEFAULT 0",
+    "suggested_rules TEXT", "anomaly_history TEXT", "state_abbr TEXT", "updated_at TEXT"
+  ]) {
+    try { await d1(`ALTER TABLE rule_candidates ADD COLUMN ${col}`); } catch (e) {
+      if (!e.message.includes("duplicate column") && !e.message.includes("already exists")) throw e;
+    }
+  }
+
+  // rules table
+  await d1(
+    `CREATE TABLE IF NOT EXISTS rules (
+       id TEXT PRIMARY KEY,
+       metric_name TEXT,
+       section TEXT,
+       pattern_type TEXT,
+       rule_text TEXT,
+       source TEXT DEFAULT 'user_approved',
+       candidate_id TEXT,
+       created_at TEXT
+     )`
+  );
+  for (const col of [
+    "metric_name TEXT", "section TEXT", "pattern_type TEXT", "rule_text TEXT",
+    "source TEXT DEFAULT 'user_approved'", "candidate_id TEXT", "created_at TEXT"
+  ]) {
+    try { await d1(`ALTER TABLE rules ADD COLUMN ${col}`); } catch (e) {
+      if (!e.message.includes("duplicate column") && !e.message.includes("already exists")) throw e;
+    }
+  }
+
   try {
     if (req.method === "GET") {
       // Fetch a single full session by id (includes _payload for decompression)
