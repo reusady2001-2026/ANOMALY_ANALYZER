@@ -67,5 +67,87 @@ function parseMonthLabel(label) {
 }
 
 module.exports = async function handler(req, res) {
-  res.status(200).json({ ok: true });
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  if (req.method === "OPTIONS") return res.status(200).end();
+
+  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+
+  const {
+    categoryName,
+    section,
+    monthLabel,
+    metricBreakdown,
+    flag,
+    stateAbbr,
+    city,
+    propertyName,
+    purchasePrice,
+    recentCategoryT3,
+  } = req.body || {};
+
+  const parsed = parseMonthLabel(monthLabel);
+  if (!parsed) return res.status(400).json({ error: "Invalid monthLabel" });
+
+  const startDate = `${parsed.year - 1}-${String(parsed.month).padStart(2,'0')}-01`;
+  const endDate   = `${parsed.year}-${String(parsed.month).padStart(2,'0')}-01`;
+
+  // ── T3 momentum drivers ──────────────────────────────────────────────────
+  const t3Drivers = (metricBreakdown || [])
+    .map(m => ({
+      name: m.name,
+      movement: (m.T3_current || 0) - (m.T3_prior || 0),
+      absMovement: Math.abs((m.T3_current || 0) - (m.T3_prior || 0)),
+      direction: (m.T3_current || 0) >= (m.T3_prior || 0) ? 'up' : 'down',
+      T3_current: m.T3_current, T3_prior: m.T3_prior, T12: m.T12,
+    }))
+    .filter(m => m.absMovement > 0)
+    .sort((a, b) => b.absMovement - a.absMovement);
+
+  // ── T12 drift drivers ────────────────────────────────────────────────────
+  const t12Drivers = (metricBreakdown || [])
+    .map(m => ({
+      name: m.name,
+      movement: (m.T3_current || 0) - (m.T12 || 0),
+      absMovement: Math.abs((m.T3_current || 0) - (m.T12 || 0)),
+      direction: (m.T3_current || 0) >= (m.T12 || 0) ? 'up' : 'down',
+      T3_current: m.T3_current, T3_prior: m.T3_prior, T12: m.T12,
+    }))
+    .filter(m => m.absMovement > 0)
+    .sort((a, b) => b.absMovement - a.absMovement);
+
+  // ── Active drivers, dominant driver, composition ─────────────────────────
+  const activeDrivers = flag.flaggedByPrior ? t3Drivers : t12Drivers;
+  const dominantDriver = activeDrivers[0] || null;
+  const totalMovement = flag.flaggedByPrior
+    ? (flag.T3_current - flag.T3_prior)
+    : (flag.T3_current - flag.T12);
+  const dominantPct = dominantDriver && totalMovement !== 0
+    ? Math.round((dominantDriver.movement / totalMovement) * 100)
+    : null;
+  const topDrivers = activeDrivers.slice(0, 3);
+
+  const upCount   = activeDrivers.filter(m => m.direction === 'up').length;
+  const downCount = activeDrivers.filter(m => m.direction === 'down').length;
+  let compositionType;
+  if (upCount === 0 || downCount === 0) compositionType = 'broad-based';
+  else if (dominantPct && Math.abs(dominantPct) >= 60) compositionType = 'single-driver';
+  else compositionType = 'mixed';
+
+  // ── Trend acceleration ───────────────────────────────────────────────────
+  let trendType = 'unknown';
+  if (recentCategoryT3 && recentCategoryT3.length >= 2) {
+    const movements = recentCategoryT3.map((r, i) => {
+      if (i === 0) return null;
+      return r.T3 - recentCategoryT3[i - 1].T3;
+    }).filter(Boolean);
+    const isAccelerating = movements.every((m, i) => i === 0 || Math.abs(m) >= Math.abs(movements[i - 1]));
+    const isDecelerating = movements.every((m, i) => i === 0 || Math.abs(m) <= Math.abs(movements[i - 1]));
+    if (isAccelerating) trendType = 'accelerating';
+    else if (isDecelerating) trendType = 'decelerating';
+    else trendType = 'volatile';
+  }
+
+  return res.status(200).json({ ok: true, t3Drivers, t12Drivers, dominantDriver, topDrivers, compositionType, trendType });
 };
