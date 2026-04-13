@@ -482,6 +482,9 @@ function resetAll(){
   document.getElementById("thresholdInfo").textContent="10bps: $0/mo";
   document.getElementById("fileInput").value="";
   ["analyzerFilters","rerunBtn","statsRow","legendRow","tableWrap","chatBar"].forEach(id=>document.getElementById(id).classList.add("hidden"));
+  const amEl=document.getElementById("assetMgmtMode");
+  amEl.classList.add("hidden");amEl.innerHTML="";
+  window._amViewMode=undefined;window._amLimit=undefined;
   document.getElementById("anomPopup").classList.add("hidden");
   document.getElementById("sidePanel").classList.add("hidden");
   document.getElementById("chatMessages").innerHTML="";
