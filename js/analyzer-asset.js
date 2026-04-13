@@ -51,24 +51,35 @@ function analyzeAsset(name, allV, months, isInc, pp, skip) {
     // ── T3 METHOD ────────────────────────────────────────────
     // T3   = (V_n + V_{n-1} + V_{n-2}) × 4  (annualized 3-month sum)
     // T3-1 = (V_{n-1} + V_{n-2} + V_{n-3}) × 4
-    // Material anomaly when |T3 - T3-1| ≥ matTh
+    // T12  = sum of vals[n-11]..vals[n] (annualized 12-month sum), or null if < 12 pts
+    // Flag if |T3 - T3-1| ≥ matTh (prior) OR |T3 - T12| ≥ matTh (T12 drift)
     // Requires 4 data points from oi onwards (n, n-1, n-2, n-3)
     for (let n = oi + 3; n < ae; n++) {
       const T3  = (vals[n]   + vals[n-1] + vals[n-2]) * 4;
       const T31 = (vals[n-1] + vals[n-2] + vals[n-3]) * 4;
+      const T12 = (n - oi) >= 11
+        ? vals.slice(n - 11, n + 1).reduce((s, v) => s + v, 0)
+        : null;
+      const flaggedByPrior = Math.abs(T3 - T31) >= matTh;
+      const flaggedByT12   = T12 !== null && Math.abs(T3 - T12) >= matTh;
+      if (!flaggedByPrior && !flaggedByT12) continue;
+      const conflicting = flaggedByPrior && flaggedByT12 &&
+        Math.sign(T3 - T31) !== Math.sign(T3 - T12);
       const diff = T3 - T31;
-      if (Math.abs(diff) >= matTh) {
-        // Positive = good for P&L:
-        //   income metric that grew  (diff > 0) → pos
-        //   expense metric that fell (diff < 0) → pos
-        const at = isInc ? (diff > 0 ? "pos" : "neg") : (diff < 0 ? "pos" : "neg");
-        res[n].st   = "anom";
-        res[n].mat  = true;
-        res[n].at   = at;
-        res[n].zm   = "t3";
-        res[n].chv  = diff;
-        res[n].z    = diff / matTh; // stored as ratio (how many thresholds away)
-      }
+      // Positive = good for P&L:
+      //   income metric that grew  (diff > 0) → pos
+      //   expense metric that fell (diff < 0) → pos
+      const at = isInc ? (diff > 0 ? "pos" : "neg") : (diff < 0 ? "pos" : "neg");
+      res[n].st   = "anom";
+      res[n].mat  = true;
+      res[n].at   = at;
+      res[n].zm   = "t3";
+      res[n].chv  = diff;
+      res[n].z    = diff / matTh;
+      res[n].flaggedByPrior = flaggedByPrior;
+      res[n].flaggedByT12   = flaggedByT12;
+      res[n].conflicting    = conflicting;
+      res[n].T12            = T12;
     }
   } else {
     // ── SPORADIC Z-SCORE METHOD ───────────────────────────────
@@ -84,14 +95,23 @@ function analyzeAsset(name, allV, months, isInc, pp, skip) {
         const v = allV[i];
         const z = (v - m) / s;
         const capImpact = Math.abs(v) * 12;
-        if (Math.abs(z) > th && capImpact >= matTh) {
-          const at = isInc ? (z > 0 ? "pos" : "neg") : (z > 0 ? "neg" : "pos");
-          res[i].st  = "anom";
-          res[i].mat = true;
-          res[i].at  = at;
-          res[i].zm  = "val";
-          res[i].z   = z;
-        }
+        const flaggedByPrior = Math.abs(z) > th && capImpact >= matTh;
+        // T12: sum of last 12 non-null values up to index i
+        const window12 = allV.slice(Math.max(0, i - 11), i + 1).filter(x => x != null);
+        const T12spor  = window12.length === 12 ? window12.reduce((s2, x) => s2 + x, 0) : null;
+        const flaggedByT12 = T12spor !== null && Math.abs(v * 12 - T12spor) >= matTh;
+        if (!flaggedByPrior && !flaggedByT12) continue;
+        const conflicting = false; // not applicable for sporadic z-score method
+        const at = isInc ? (z > 0 ? "pos" : "neg") : (z > 0 ? "neg" : "pos");
+        res[i].st  = "anom";
+        res[i].mat = true;
+        res[i].at  = at;
+        res[i].zm  = "val";
+        res[i].z   = z;
+        res[i].flaggedByPrior = flaggedByPrior;
+        res[i].flaggedByT12   = flaggedByT12;
+        res[i].conflicting    = conflicting;
+        res[i].T12            = T12spor;
       }
     }
   }
@@ -145,11 +165,16 @@ function analyzeAssetStructural(name,allV,months,isInc,pp,skip,phases){
     if(ph.type==="continuous"){
       // T3 method — requires 4 months from phase opening
       for(let n=pOi+3;n<=pEnd;n++){
-        const T3=(vals[n]+vals[n-1]+vals[n-2])*4,T31=(vals[n-1]+vals[n-2]+vals[n-3])*4,diff=T3-T31;
-        if(Math.abs(diff)>=matTh){
-          const at=isInc?(diff>0?"pos":"neg"):(diff<0?"pos":"neg");
-          res[n]={mi:n,v:allV[n],z:diff/matTh,st:"anom",mat:true,at,seas:false,recur:false,zm:"t3",chv:diff};
-        }
+        const T3=(vals[n]+vals[n-1]+vals[n-2])*4,T31=(vals[n-1]+vals[n-2]+vals[n-3])*4;
+        const T12=(n-pOi)>=11?vals.slice(n-11,n+1).reduce((s,v)=>s+v,0):null;
+        const flaggedByPrior=Math.abs(T3-T31)>=matTh;
+        const flaggedByT12=T12!==null&&Math.abs(T3-T12)>=matTh;
+        if(!flaggedByPrior&&!flaggedByT12)continue;
+        const conflicting=flaggedByPrior&&flaggedByT12&&Math.sign(T3-T31)!==Math.sign(T3-T12);
+        const diff=T3-T31;
+        const at=isInc?(diff>0?"pos":"neg"):(diff<0?"pos":"neg");
+        res[n]={mi:n,v:allV[n],z:diff/matTh,st:"anom",mat:true,at,seas:false,recur:false,zm:"t3",chv:diff,
+                flaggedByPrior,flaggedByT12,conflicting,T12};
       }
     }else{
       // Z-score + cap-rate dual filter
