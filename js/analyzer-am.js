@@ -431,8 +431,6 @@ function renderAMAnalyzer(results, months, purchasePrice, containerId) {
   });
 }
 
-window.renderAMAnalyzer = renderAMAnalyzer;
-
 // ── renderAMDetailPanel ───────────────────────────────────────
 
 function renderAMDetailPanel(apiResponse, flag, metricBreakdown, months) {
@@ -599,3 +597,34 @@ function renderAMDetailPanel(apiResponse, flag, metricBreakdown, months) {
 
   body.innerHTML = html;
 }
+
+// ── fetchAMReasoning ──────────────────────────────────────────
+
+async function fetchAMReasoning(flag, metricBreakdown, stateAbbr, city, propertyName, purchasePrice, months) {
+  const payload = {
+    categoryName:      flag.name,
+    section:           flag.section,
+    monthLabel:        flag.worstMonthLabel || flag.worstFlagMonth,
+    metricBreakdown,
+    flag,
+    stateAbbr,
+    city,
+    propertyName,
+    purchasePrice,
+    recentCategoryT3:  [],
+  };
+  try {
+    const res = await fetch('/api/am-reasoning', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error('am-reasoning returned ' + res.status);
+    return await res.json();
+  } catch (e) {
+    console.warn('[fetchAMReasoning] failed:', e);
+    throw e;
+  }
+}
+
+window.renderAMAnalyzer = renderAMAnalyzer;
