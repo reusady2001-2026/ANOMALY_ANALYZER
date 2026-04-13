@@ -158,25 +158,32 @@ module.exports = async function handler(req, res) {
 
   // ── T3 momentum drivers ──────────────────────────────────────────────────
   const t3Drivers = (metricBreakdown || [])
-    .map(m => ({
-      name: m.name,
-      movement: (m.T3_current || 0) - (m.T3_prior || 0),
-      absMovement: Math.abs((m.T3_current || 0) - (m.T3_prior || 0)),
-      direction: (m.T3_current || 0) >= (m.T3_prior || 0) ? 'up' : 'down',
-      T3_current: m.T3_current, T3_prior: m.T3_prior, T12: m.T12,
-    }))
+    .map(m => {
+      const cur = m.T3_current ?? m.T3current ?? 0;
+      const pri = m.T3_prior   ?? m.T3prior   ?? 0;
+      return {
+        name: m.name,
+        movement: cur - pri,
+        absMovement: Math.abs(cur - pri),
+        direction: cur >= pri ? 'up' : 'down',
+        T3_current: cur, T3_prior: pri, T12: m.T12,
+      };
+    })
     .filter(m => m.absMovement > 0)
     .sort((a, b) => b.absMovement - a.absMovement);
 
   // ── T12 drift drivers ────────────────────────────────────────────────────
   const t12Drivers = (metricBreakdown || [])
-    .map(m => ({
-      name: m.name,
-      movement: (m.T3_current || 0) - (m.T12 || 0),
-      absMovement: Math.abs((m.T3_current || 0) - (m.T12 || 0)),
-      direction: (m.T3_current || 0) >= (m.T12 || 0) ? 'up' : 'down',
-      T3_current: m.T3_current, T3_prior: m.T3_prior, T12: m.T12,
-    }))
+    .map(m => {
+      const cur = m.T3_current ?? m.T3current ?? 0;
+      return {
+        name: m.name,
+        movement: cur - (m.T12 || 0),
+        absMovement: Math.abs(cur - (m.T12 || 0)),
+        direction: cur >= (m.T12 || 0) ? 'up' : 'down',
+        T3_current: cur, T3_prior: m.T3_prior ?? m.T3prior, T12: m.T12,
+      };
+    })
     .filter(m => m.absMovement > 0)
     .sort((a, b) => b.absMovement - a.absMovement);
 
