@@ -167,7 +167,7 @@ async function deleteSessionFromCloud(id){
   catch(e){console.warn('Cloud delete failed:',e);}
 }
 
-function saveCurrentSession(fileName){
+async function saveCurrentSession(fileName){
   const sliced=window._sliced||DATA;
   if(!sliced||!RESULTS)return;
   const session={
@@ -192,7 +192,50 @@ function saveCurrentSession(fileName){
     aiCache:window._aiCache||{},
   };
   // Bypass debounce — explicit save button needs a real success/failure result.
-  return _pushSessionImpl(session);
+  const ok=await _pushSessionImpl(session);
+  if(ok)detectPatternsFromSession(session); // fire and forget
+  return ok;
+}
+
+async function detectPatternsFromSession(session){
+  if(session.mode!=='analyzer')return;
+  const anomalies=[];
+  const stateAbbr=(window.Context?.STATE_ABBR?.[session.state]||'');
+  for(const metric of(session.results||[])){
+    if(!metric.res)continue;
+    for(let i=0;i<metric.res.length;i++){
+      const cell=metric.res[i];
+      if(cell.st!=='anom'&&cell.st!=='seas')continue;
+      anomalies.push({
+        metricName:metric.name,
+        section:metric.sec==='income'?'INCOME':'EXPENSES',
+        monthLabel:(session.months||[])[i]||'',
+        angle:metric.reasonData?.[i]?.situationProfile?.angle||'ANOMALY_ALERT',
+        propertyName:session.fileName||'unknown',
+        effectiveZ:cell.z||0,
+        stateAbbr,
+      });
+    }
+  }
+  if(!anomalies.length)return;
+  try{
+    const r=await fetch('/api/detect-patterns',{method:'POST',cache:'no-store',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify({anomalies})});
+    if(!r.ok)return;
+    const d=await r.json();
+    if(!d.ok)return;
+    const r2=await fetch('/api/get-rule-candidates',{cache:'no-store'});
+    if(!r2.ok)return;
+    const d2=await r2.json();
+    if(!d2.success)return;
+    window._state=window._state||{};
+    window._state.ruleCandidates=d2.candidates;
+    if(d2.candidates.length>0&&typeof UI!=='undefined'&&typeof UI.showRuleCandidates==='function'){
+      UI.showRuleCandidates();
+    }
+  }catch(e){
+    console.warn('[detectPatterns] failed:',e);
+  }
 }
 
 function saveCompSession(){
