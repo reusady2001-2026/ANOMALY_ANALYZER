@@ -198,23 +198,47 @@ async function saveCurrentSession(fileName){
 }
 
 async function detectPatternsFromSession(session){
-  if(session.mode!=='analyzer')return;
+  if(session.platform!=='operational')return;
+  if(session.mode!=='analyzer'&&session.mode!=='comparison')return;
   const anomalies=[];
-  const stateAbbr=(window.Context?.STATE_ABBR?.[session.state]||'');
-  for(const metric of(session.results||[])){
-    if(!metric.res)continue;
-    for(let i=0;i<metric.res.length;i++){
-      const cell=metric.res[i];
-      if(cell.st!=='anom'&&cell.st!=='seas')continue;
-      anomalies.push({
-        metricName:metric.name,
-        section:metric.sec==='income'?'INCOME':'EXPENSES',
-        monthLabel:(session.months||[])[i]||'',
-        angle:metric.reasonData?.[i]?.situationProfile?.angle||'ANOMALY_ALERT',
-        propertyName:session.fileName||'unknown',
-        effectiveZ:cell.z||0,
-        stateAbbr,
-      });
+  if(session.mode==='analyzer'){
+    const stateAbbr=(window.Context?.STATE_ABBR?.[session.state]||'');
+    for(const metric of(session.results||[])){
+      if(!metric.res)continue;
+      for(let i=0;i<metric.res.length;i++){
+        const cell=metric.res[i];
+        if(cell.st!=='anom'&&cell.st!=='seas')continue;
+        anomalies.push({
+          metricName:metric.name,
+          section:metric.sec==='income'?'INCOME':'EXPENSES',
+          monthLabel:(session.months||[])[i]||'',
+          angle:metric.reasonData?.[i]?.situationProfile?.angle||'ANOMALY_ALERT',
+          propertyName:session.fileName||'unknown',
+          effectiveZ:cell.z||0,
+          stateAbbr,
+        });
+      }
+    }
+  }else{
+    for(const prop of(session.properties||[])){
+      const stateAbbr=(window.Context?.STATE_ABBR?.[prop.state]||'');
+      const months=prop.sliced?.months||[];
+      for(const metric of(prop.results||[])){
+        if(!metric.res)continue;
+        for(let i=0;i<metric.res.length;i++){
+          const cell=metric.res[i];
+          if(cell.st!=='anom'&&cell.st!=='seas')continue;
+          anomalies.push({
+            metricName:metric.name,
+            section:metric.sec==='income'?'INCOME':'EXPENSES',
+            monthLabel:months[i]||'',
+            angle:metric.reasonData?.[i]?.situationProfile?.angle||'ANOMALY_ALERT',
+            propertyName:prop.name||'unknown',
+            effectiveZ:cell.z||0,
+            stateAbbr,
+          });
+        }
+      }
     }
   }
   if(!anomalies.length)return;
