@@ -40,6 +40,16 @@ function renderAnalyzer(){if(!RESULTS)return;const sliced=window._sliced||DATA;i
     if(f==="mat")b.textContent=PLATFORM==="asset"?"Material Anomalies":"Material";
   });
   document.getElementById("focusGroup").style.display=PLATFORM==="asset"?"none":"";
+  if(PLATFORM==="asset"){
+    document.getElementById("tableWrap").classList.add("hidden");
+    const amEl=document.getElementById("assetMgmtMode");
+    amEl.classList.remove("hidden");
+    amEl.style.cssText="";  // clear placeholder centering
+    const pp=getP("ppInput");
+    const months=(window._sliced||DATA).months;
+    renderAMAnalyzer(RESULTS,months,pp);
+    return;
+  }
   const filtered=applyFilter(RESULTS,FILTER,SEC_FILTER,MT_FILTER);document.getElementById("statsRow").innerHTML=statsHTML(getStats(RESULTS));
   const months=sliced.months;const sk=window._slicedSkip||SKIP;let html=`<thead><tr><th class="metric-col">Metric</th><th class="type-col">Type</th>`;months.forEach((m,i)=>html+=`<th class="${i>=months.length-sk&&sk>0?"skip-col":""}" style="font-size:8px;">${m}</th>`);
   html+=`<th class="trend-col">Trend</th><th class="trend-col">12M</th><th class="trend-col">3M</th><th class="quarter-col">Str Q</th><th class="quarter-col">Wk Q</th></tr></thead><tbody>`;
