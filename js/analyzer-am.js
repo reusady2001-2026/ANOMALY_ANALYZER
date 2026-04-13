@@ -197,22 +197,26 @@ function _buildCategoryFlags(results, months) {
 }
 
 // Build the metricBreakdown array used by fetchAMReasoning + renderAMDetailPanel.
+// For category flags every metric is measured at the same reference month (flag.worstIdx)
+// so that driver sums and totals are meaningful across metrics.
 function _metricBreakdownForFlag(flag) {
-  if (flag.isCategoryFlag) {
-    return flag.flags.map(f => ({
-      name:      f.name,
-      T3current: f.T3_current,
-      T3prior:   f.T3_prior,
-      T12:       f.T12,
-      at:        f.at,
-    }));
+  if (flag.isCategoryFlag && flag.flags?.length) {
+    const refIdx = flag.worstIdx;
+    return flag.flags.map(f => {
+      const vals       = f.result.res.map(rx => rx?.v || 0);
+      const n          = refIdx;
+      const T3_current = n >= 2 ? (vals[n] + vals[n-1] + vals[n-2]) * 4 : vals[n] * 12;
+      const T3_prior   = n >= 3 ? (vals[n-1] + vals[n-2] + vals[n-3]) * 4 : null;
+      const T12        = n >= 11 ? vals.slice(n-11, n+1).reduce((s, v) => s + v, 0) : null;
+      return { name: f.name, T3_current, T3_prior, T12, at: f.at };
+    });
   }
   return [{
-    name:      flag.name,
-    T3current: flag.T3_current,
-    T3prior:   flag.T3_prior,
-    T12:       flag.T12,
-    at:        flag.at,
+    name:       flag.name,
+    T3_current: flag.T3_current,
+    T3_prior:   flag.T3_prior,
+    T12:        flag.T12,
+    at:         flag.at,
   }];
 }
 
@@ -472,131 +476,178 @@ function renderAMDetailPanel(apiResponse, flag, metricBreakdown, months) {
 
   let html = '';
 
-  // Header
+  // ─ Header ──────────────────────────────────────────────────
   if (flag) {
-    html += '<div style="font-family:var(--font-display);font-size:13px;font-weight:700;color:var(--text-primary);margin-bottom:4px;">' + (flag.name || '') + '</div>';
-    html += '<div style="font-family:var(--font-display);font-size:10px;color:var(--text-muted);margin-bottom:16px;">' + (flag.worstFlagMonth || '') + ' \u00b7 ' + _triggerLabel(flag) + '</div>';
+    html += '<div style="font-family:var(--font-display);font-size:13px;font-weight:700;color:var(--text-primary);margin-bottom:4px;">' + (flag.name||'') + '</div>';
+    html += '<div style="font-family:var(--font-display);font-size:10px;color:var(--text-muted);margin-bottom:16px;">' + (flag.worstFlagMonth||'') + ' \u00b7 ' + _triggerLabel(flag) + '</div>';
   }
 
-  // ── renderReasonPanel output (if available) ───────────────
-  if (typeof window.renderReasonPanel === 'function' && apiResponse) {
-    html += window.renderReasonPanel(apiResponse);
+  // ─ 1. Analysis reasoning (most prominent) ──────────────────
+  if (apiResponse?.reasoning) {
+    html +=
+      '<div style="background:var(--bg-elevated);border-left:3px solid var(--accent);border-radius:var(--radius);padding:12px 14px;margin-bottom:16px;">' +
+        '<div style="font-family:var(--font-display);font-size:9px;font-weight:700;letter-spacing:1px;color:var(--accent);text-transform:uppercase;margin-bottom:6px;">Analysis</div>' +
+        '<div style="font-family:var(--font-body,var(--font-display));font-size:11px;color:var(--text-primary);line-height:1.7;">' +
+          (apiResponse.reasoning||'').replace(/\n/g,'<br>') +
+        '</div>' +
+      '</div>';
   }
 
-  // ── T3 visual: 12 colored boxes ───────────────────────────
-  if (flag && flag.result && months && months.length) {
+  // ─ 2. Top Drivers ──────────────────────────────────────────
+  if (apiResponse?.topDrivers?.length) {
+    const dRef = flag?.flaggedByPrior ? 'vs prior quarter' : 'vs T12 baseline';
+    html += '<div style="margin-bottom:16px;">';
+    html += '<div style="font-family:var(--font-display);font-size:9px;font-weight:700;letter-spacing:1px;color:var(--text-muted);text-transform:uppercase;margin-bottom:8px;">Top Drivers (' + dRef + ')</div>';
+    apiResponse.topDrivers.forEach((d, i) => {
+      const dc = d.direction === 'up' ? 'var(--green)' : 'var(--red)';
+      const da = d.direction === 'up' ? '\u2191' : '\u2193';
+      html +=
+        '<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--border);">' +
+          '<span style="font-family:var(--font-display);font-size:10px;color:var(--text-primary);">' + (i+1) + '. ' + (d.name||'') + '</span>' +
+          '<span style="font-family:var(--font-display);font-size:11px;font-weight:700;color:' + dc + ';">' + da + ' ' + _fmtAmt(Math.abs(d.movement||0)) + '</span>' +
+        '</div>';
+    });
+    html += '</div>';
+  }
+
+  // ─ 3. Driver Breakdown table ────────────────────────────────
+  // All metrics measured at the same reference month so totals are meaningful.
+  // T3 Now = (3-month sum) × 4 annualized; T3 Prior = same one month earlier; T12 = trailing 12-month sum.
+  if (metricBreakdown?.length) {
+    const thS = 'padding:5px 8px;text-align:right;font-family:var(--font-display);font-size:9px;font-weight:700;letter-spacing:0.5px;color:var(--text-muted);text-transform:uppercase;border-bottom:1px solid var(--border);white-space:nowrap;';
+    const thL = thS.replace('text-align:right','text-align:left');
+    const tdS = 'padding:5px 8px;text-align:right;font-family:var(--font-display);font-size:10px;color:var(--text-secondary);border-bottom:1px solid var(--border);white-space:nowrap;';
+    const tdL = tdS.replace('text-align:right','text-align:left')+'color:var(--text-primary);max-width:130px;overflow:hidden;text-overflow:ellipsis;';
+    const tdB = tdS+'font-weight:700;color:var(--text-primary);border-bottom:none;border-top:2px solid var(--border);';
+    const tdBL= tdB.replace('text-align:right','text-align:left');
+
+    html += '<div style="margin-bottom:16px;">';
+    html += '<div style="font-family:var(--font-display);font-size:9px;font-weight:700;letter-spacing:1px;color:var(--text-muted);text-transform:uppercase;margin-bottom:3px;">Driver Breakdown</div>';
+    html += '<div style="font-family:var(--font-display);font-size:9px;color:var(--text-muted);margin-bottom:8px;">Annualized run rates at ' + (flag?.worstFlagMonth||'reference month') + ' &middot; T3\u00d74 = quarterly \u00d7 4</div>';
+    html += '<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;">';
+    html += '<thead><tr>';
+    html += '<th style="' + thL + '">Metric</th>';
+    html += '<th style="' + thS + '" title="3-month sum \u00d7 4 at reference month">T3 Now</th>';
+    html += '<th style="' + thS + '" title="3-month sum \u00d7 4 one month prior">T3 Prior</th>';
+    html += '<th style="' + thS + '" title="Trailing 12-month sum">T12</th>';
+    html += '</tr></thead><tbody>';
+
+    let sumCur=0, sumPri=0, sumT12=0, hasPri=false, hasTwelve=false;
+    for (const m of metricBreakdown) {
+      const cur = m.T3_current ?? null;
+      const pri = m.T3_prior   ?? null;
+      const t12 = m.T12        ?? null;
+      if (cur != null) sumCur  += cur;
+      if (pri != null) { sumPri  += pri;  hasPri    = true; }
+      if (t12 != null) { sumT12  += t12;  hasTwelve = true; }
+      const diff   = cur != null && pri != null ? cur - pri : null;
+      const curCol = diff == null ? '' : diff > 0 ? ';color:var(--green)' : ';color:var(--red)';
+      html += '<tr>';
+      html += '<td style="' + tdL  + '">' + (m.name||'') + '</td>';
+      html += '<td style="' + tdS + curCol + '">' + (cur != null ? _fmtAmt(cur) : '\u2014') + '</td>';
+      html += '<td style="' + tdS + '">' + (pri != null ? _fmtAmt(pri) : '\u2014') + '</td>';
+      html += '<td style="' + tdS + '">' + (t12 != null ? _fmtAmt(t12) : '\u2014') + '</td>';
+      html += '</tr>';
+    }
+    if (metricBreakdown.length > 1) {
+      html += '<tr><td style="' + tdBL + '">Total</td>';
+      html += '<td style="' + tdB  + '">' + _fmtAmt(sumCur)  + '</td>';
+      html += '<td style="' + tdB  + '">' + (hasPri     ? _fmtAmt(sumPri)  : '\u2014') + '</td>';
+      html += '<td style="' + tdB  + '">' + (hasTwelve  ? _fmtAmt(sumT12)  : '\u2014') + '</td>';
+      html += '</tr>';
+    }
+    html += '</tbody></table></div></div>';
+  }
+
+  // ─ 4. Monthly values (T3 boxes) ────────────────────────────
+  // Category flags show the summed category total per month.
+  // Blue boxes = T3 current window, orange = T3 prior window.
+  if (flag && months?.length) {
     const winLen  = Math.min(months.length, 12);
-    const startMi = months.length - winLen; // absolute month index of first box
-    const res     = flag.result.res;
+    const startMi = months.length - winLen;
+    const refN    = flag.worstIdx;        // worst month (absolute index)
+    const relN    = refN - startMi;      // position within the 12-box window
 
-    // Per-box background: determine which T3 window(s) each position belongs to
+    // Build per-box values
+    const boxVals = [];
+    if (flag.isCategoryFlag && flag.flags?.length) {
+      for (let j = 0; j < winLen; j++) {
+        const mi = startMi + j;
+        let tot = 0;
+        for (const f of flag.flags) tot += f.result?.res[mi]?.v || 0;
+        boxVals.push(tot);
+      }
+    } else {
+      const res = flag.result?.res || [];
+      for (let j = 0; j < winLen; j++) boxVals.push(res[startMi + j]?.v ?? null);
+    }
+
     function boxBg(j) {
-      const inCurrent = j >= winLen - 3;               // t3Indices
-      const inPrior   = j >= winLen - 4 && j <= winLen - 2; // t3PriorIndices
-      if (inCurrent && inPrior)
-        return 'linear-gradient(135deg,var(--blue) 50%,var(--orange) 50%)';
-      if (inCurrent) return 'var(--blue)';
-      if (inPrior)   return 'var(--orange)';
+      if (relN < 0 || relN >= winLen) return 'var(--bg-elevated)';
+      const inCur = j >= relN - 2 && j <= relN;
+      const inPri = j >= relN - 3 && j <= relN - 1;
+      if (inCur && inPri) return 'linear-gradient(135deg,var(--blue) 50%,var(--orange) 50%)';
+      if (inCur) return 'var(--blue)';
+      if (inPri) return 'var(--orange)';
       return 'var(--bg-elevated)';
     }
 
     html += '<div style="margin-bottom:16px;">';
-    html += '<div style="font-family:var(--font-display);font-size:9px;font-weight:700;letter-spacing:1px;color:var(--text-muted);text-transform:uppercase;margin-bottom:8px;">T3 Rolling Window</div>';
+    html += '<div style="font-family:var(--font-display);font-size:9px;font-weight:700;letter-spacing:1px;color:var(--text-muted);text-transform:uppercase;margin-bottom:8px;">Monthly Values' + (flag.isCategoryFlag ? ' \u2014 Category Total' : '') + '</div>';
     html += '<div style="display:flex;gap:3px;align-items:flex-end;">';
-
     for (let j = 0; j < winLen; j++) {
-      const mi    = startMi + j;
-      const entry = res[mi];
-      const v     = entry?.v;
-      const bg    = boxBg(j);
-      const label = (months[mi] || '').split(' ')[0]; // month abbrev only
-      const valStr = v != null ? _fmtAmt(v) : '';
-
+      const mi = startMi + j;
+      const v  = boxVals[j];
       html +=
         '<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;">' +
-          '<div style="font-family:var(--font-display);font-size:8px;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:34px;text-align:center;">' + valStr + '</div>' +
-          '<div style="height:28px;width:100%;border-radius:3px;background:' + bg + ';"></div>' +
-          '<div style="font-family:var(--font-display);font-size:8px;color:var(--text-muted);">' + label + '</div>' +
+          '<div style="font-family:var(--font-display);font-size:8px;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:34px;text-align:center;">' + (v != null ? _fmtAmt(v) : '') + '</div>' +
+          '<div style="height:28px;width:100%;border-radius:3px;background:' + boxBg(j) + ';"></div>' +
+          '<div style="font-family:var(--font-display);font-size:8px;color:var(--text-muted);">' + (months[mi]||'').split(' ')[0] + '</div>' +
         '</div>';
     }
-
-    html += '</div>'; // flex row
-
-    // Legend
+    html += '</div>';
     html +=
       '<div style="display:flex;gap:12px;margin-top:8px;">' +
-        '<div style="display:flex;align-items:center;gap:4px;font-family:var(--font-display);font-size:9px;color:var(--text-muted);">' +
-          '<span style="width:10px;height:10px;background:var(--blue);display:inline-block;border-radius:2px;"></span>T3 current</div>' +
-        '<div style="display:flex;align-items:center;gap:4px;font-family:var(--font-display);font-size:9px;color:var(--text-muted);">' +
-          '<span style="width:10px;height:10px;background:var(--orange);display:inline-block;border-radius:2px;"></span>T3 prior</div>' +
-        '<div style="display:flex;align-items:center;gap:4px;font-family:var(--font-display);font-size:9px;color:var(--text-muted);">' +
-          '<span style="width:10px;height:10px;background:var(--bg-elevated);border:1px solid var(--border);display:inline-block;border-radius:2px;"></span>T12 baseline</div>' +
+        '<div style="display:flex;align-items:center;gap:4px;font-family:var(--font-display);font-size:9px;color:var(--text-muted);"><span style="width:10px;height:10px;background:var(--blue);display:inline-block;border-radius:2px;"></span>T3 current</div>' +
+        '<div style="display:flex;align-items:center;gap:4px;font-family:var(--font-display);font-size:9px;color:var(--text-muted);"><span style="width:10px;height:10px;background:var(--orange);display:inline-block;border-radius:2px;"></span>T3 prior</div>' +
       '</div>';
-
-    html += '</div>'; // T3 section
+    html += '</div>';
   }
 
-  // ── Driver breakdown table ────────────────────────────────
-  if (metricBreakdown && metricBreakdown.length) {
-    const thStyle = 'padding:5px 8px;text-align:right;font-family:var(--font-display);font-size:9px;font-weight:700;letter-spacing:0.5px;color:var(--text-muted);text-transform:uppercase;border-bottom:1px solid var(--border);white-space:nowrap;';
-    const thLeft  = thStyle.replace('text-align:right', 'text-align:left');
-    const tdStyle = 'padding:5px 8px;text-align:right;font-family:var(--font-display);font-size:10px;color:var(--text-secondary);border-bottom:1px solid var(--border);white-space:nowrap;';
-    const tdLeft  = tdStyle.replace('text-align:right', 'text-align:left') + 'color:var(--text-primary);max-width:130px;overflow:hidden;text-overflow:ellipsis;';
-    const tdBold  = tdStyle + 'font-weight:700;color:var(--text-primary);border-bottom:none;border-top:2px solid var(--border);';
-    const tdBoldL = tdBold.replace('text-align:right', 'text-align:left');
+  // ─ 5. Context signals ──────────────────────────────────────
+  const _ctx  = apiResponse?.externalContext  || {};
+  const _port = apiResponse?.portfolioContext || [];
+  const _seas = apiResponse?.seasonalPattern;
+  const _rows = [];
+  if (_ctx.fedfunds   != null) _rows.push(['Fed Funds',     _ctx.fedfunds.toFixed(2)+'%']);
+  if (_ctx.stateUR    != null) _rows.push(['State UR',      _ctx.stateUR.toFixed(1)+'%']);
+  if (_ctx.rentCPI    != null) _rows.push(['Rent CPI',      _ctx.rentCPI.toFixed(1)]);
+  if (_ctx.energyCPI  != null) _rows.push(['Energy CPI',    _ctx.energyCPI.toFixed(1)]);
+  if (_ctx.mortgage30 != null) _rows.push(['30Y Mortgage',  _ctx.mortgage30.toFixed(2)+'%']);
+  if (_ctx.hdd        != null) _rows.push(['HDD',           String(_ctx.hdd)]);
+  if (_ctx.cdd        != null) _rows.push(['CDD',           String(_ctx.cdd)]);
 
-    html += '<div style="margin-bottom:16px;">';
-    html += '<div style="font-family:var(--font-display);font-size:9px;font-weight:700;letter-spacing:1px;color:var(--text-muted);text-transform:uppercase;margin-bottom:8px;">Driver Breakdown</div>';
-    html += '<div style="overflow-x:auto;">';
-    html += '<table style="width:100%;border-collapse:collapse;">';
-    html += '<thead><tr>';
-    html += '<th style="' + thLeft  + '">Metric</th>';
-    html += '<th style="' + thStyle + '">T3 Current</th>';
-    html += '<th style="' + thStyle + '">T3 Prior</th>';
-    html += '<th style="' + thStyle + '">T12</th>';
-    html += '</tr></thead><tbody>';
-
-    let sumCurrent = 0, sumPrior = 0, sumT12 = 0;
-    let hasPrior = false, hasT12 = false;
-
-    for (const m of metricBreakdown) {
-      const cur = m.T3current ?? m.T3_current ?? null;
-      const pri = m.T3prior   ?? m.T3_prior   ?? null;
-      const t12 = m.T12       ?? null;
-      if (cur != null) { sumCurrent += cur; }
-      if (pri != null) { sumPrior   += pri; hasPrior = true; }
-      if (t12 != null) { sumT12     += t12; hasT12   = true; }
-      const diff = cur != null && pri != null ? cur - pri : null;
-      const curColor = diff == null ? 'color:var(--text-secondary)' : diff > 0 ? 'color:var(--green)' : 'color:var(--red)';
-      html += '<tr>';
-      html += '<td style="' + tdLeft  + '">' + (m.name || '') + '</td>';
-      html += '<td style="' + tdStyle + ';' + curColor + '">' + (cur != null ? _fmtAmt(cur) : '\u2014') + '</td>';
-      html += '<td style="' + tdStyle + '">' + (pri != null ? _fmtAmt(pri) : '\u2014') + '</td>';
-      html += '<td style="' + tdStyle + '">' + (t12 != null ? _fmtAmt(t12) : '\u2014') + '</td>';
-      html += '</tr>';
+  if (_rows.length || _port.length || _seas?.recurring) {
+    html += '<details style="margin-bottom:16px;"><summary style="font-family:var(--font-display);font-size:9px;font-weight:700;letter-spacing:1px;color:var(--text-muted);text-transform:uppercase;cursor:pointer;padding:4px 0;">\u25B6 Context &amp; Signals</summary>';
+    html += '<div style="margin-top:10px;">';
+    if (_seas?.recurring) {
+      html += '<div style="background:var(--bg-elevated);border-left:3px solid var(--orange);border-radius:var(--radius);padding:8px 12px;margin-bottom:10px;font-family:var(--font-display);font-size:10px;color:var(--text-secondary);">\uD83D\uDD04 Seasonal: same pattern in ' + _seas.years.join(', ') + '</div>';
     }
-
-    if (metricBreakdown.length > 1) {
-      html += '<tr>';
-      html += '<td style="' + tdBoldL + '">Total</td>';
-      html += '<td style="' + tdBold  + '">' + _fmtAmt(sumCurrent) + '</td>';
-      html += '<td style="' + tdBold  + '">' + (hasPrior ? _fmtAmt(sumPrior) : '\u2014') + '</td>';
-      html += '<td style="' + tdBold  + '">' + (hasT12   ? _fmtAmt(sumT12)   : '\u2014') + '</td>';
-      html += '</tr>';
+    const sameState  = _port.filter(p => p.locationProximity==='same-state').length;
+    const sameRegion = _port.filter(p => p.locationProximity==='same-region').length;
+    if (sameState >= 1) {
+      html += '<div style="font-family:var(--font-display);font-size:10px;color:var(--text-secondary);margin-bottom:6px;">\uD83C\uDFDA\uFE0F ' + sameState + ' other same-state propert' + (sameState===1?'y':'ies') + ' with similar movement</div>';
+    } else if (sameRegion >= 1) {
+      html += '<div style="font-family:var(--font-display);font-size:10px;color:var(--text-secondary);margin-bottom:6px;">\uD83D\uDDFA\uFE0F ' + sameRegion + ' regional propert' + (sameRegion===1?'y':'ies') + ' with similar movement</div>';
     }
-
-    html += '</tbody></table></div></div>'; // end table section
-  }
-
-  // ── Reasoning text ────────────────────────────────────────
-  if (apiResponse?.reasoning) {
-    html +=
-      '<div style="margin-bottom:16px;">' +
-        '<div style="font-family:var(--font-display);font-size:9px;font-weight:700;letter-spacing:1px;color:var(--text-muted);text-transform:uppercase;margin-bottom:8px;">Analysis</div>' +
-        '<div style="font-family:var(--font-body,var(--font-display));font-size:11px;color:var(--text-primary);line-height:1.7;">' +
-          apiResponse.reasoning.replace(/\n/g, '<br>') +
-        '</div>' +
-      '</div>';
+    if (_rows.length) {
+      html += '<table style="width:100%;border-collapse:collapse;">';
+      _rows.forEach(([l,v]) => {
+        html += '<tr><td style="font-family:var(--font-display);font-size:9px;color:var(--text-muted);padding:3px 0;">' + l + '</td><td style="font-family:var(--font-display);font-size:9px;color:var(--text-secondary);text-align:right;padding:3px 0;">' + v + '</td></tr>';
+      });
+      html += '</table>';
+    }
+    html += '</div></details>';
   }
 
   body.innerHTML = html;
@@ -605,12 +656,27 @@ function renderAMDetailPanel(apiResponse, flag, metricBreakdown, months) {
 // ── fetchAMReasoning ──────────────────────────────────────────
 
 async function fetchAMReasoning(flag, metricBreakdown, stateAbbr, city, propertyName, purchasePrice, months) {
+  // Strip large nested objects (result, flags) — API only needs scalar fields
+  const flagPayload = {
+    name:           flag.name,
+    section:        flag.section,
+    at:             flag.at,
+    worstFlagMonth: flag.worstFlagMonth,
+    movement:       flag.movement,
+    flaggedByPrior: flag.flaggedByPrior,
+    flaggedByT12:   flag.flaggedByT12,
+    conflicting:    flag.conflicting,
+    T3_current:     flag.T3_current,
+    T3_prior:       flag.T3_prior,
+    T12:            flag.T12,
+    isCategoryFlag: flag.isCategoryFlag || false,
+  };
   const payload = {
     categoryName:      flag.name,
     section:           flag.section,
     monthLabel:        flag.worstMonthLabel || flag.worstFlagMonth,
     metricBreakdown,
-    flag,
+    flag:              flagPayload,
     stateAbbr,
     city,
     propertyName,
