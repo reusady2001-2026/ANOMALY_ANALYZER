@@ -432,3 +432,170 @@ function renderAMAnalyzer(results, months, purchasePrice, containerId) {
 }
 
 window.renderAMAnalyzer = renderAMAnalyzer;
+
+// ── renderAMDetailPanel ───────────────────────────────────────
+
+function renderAMDetailPanel(apiResponse, flag, metricBreakdown, months) {
+  // ── create or reuse panel (same CSS classes as #sidePanel) ──
+  let panel = document.getElementById('amDetailPanel');
+  if (!panel) {
+    panel = document.createElement('div');
+    panel.id = 'amDetailPanel';
+    panel.className = 'side-panel';
+    panel.style.cssText = 'z-index:220;transform:translateX(100%);transition:transform 0.25s ease;';
+    panel.innerHTML =
+      '<div class="side-panel-header">' +
+        '<h3 style="font-family:var(--font-display);font-size:11px;font-weight:700;letter-spacing:1px;color:var(--text-primary);margin:0;">ASSET DETAIL</h3>' +
+        '<button class="ai-panel-close" id="amDetailClose" style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:16px;padding:4px 8px;line-height:1;">&#x2715;</button>' +
+      '</div>' +
+      '<div class="side-panel-body" id="amDetailBody"></div>';
+    document.body.appendChild(panel);
+    panel.querySelector('#amDetailClose').addEventListener('click', () => {
+      panel.style.transform = 'translateX(100%)';
+    });
+  }
+
+  // Slide in
+  panel.style.transform = 'translateX(0)';
+  const body = document.getElementById('amDetailBody');
+
+  // Show loading state while apiResponse is null
+  if (!apiResponse && flag) {
+    body.innerHTML =
+      '<div style="font-family:var(--font-display);font-size:11px;color:var(--text-muted);padding:20px 0;">' +
+      flag.name + ' \u2014 ' + flag.worstFlagMonth + '</div>' +
+      '<div class="ai-loading"><span class="spinner"></span> Fetching analysis\u2026</div>';
+    return;
+  }
+
+  let html = '';
+
+  // Header
+  if (flag) {
+    html += '<div style="font-family:var(--font-display);font-size:13px;font-weight:700;color:var(--text-primary);margin-bottom:4px;">' + (flag.name || '') + '</div>';
+    html += '<div style="font-family:var(--font-display);font-size:10px;color:var(--text-muted);margin-bottom:16px;">' + (flag.worstFlagMonth || '') + ' \u00b7 ' + _triggerLabel(flag) + '</div>';
+  }
+
+  // ── renderReasonPanel output (if available) ───────────────
+  if (typeof window.renderReasonPanel === 'function' && apiResponse) {
+    html += window.renderReasonPanel(apiResponse);
+  }
+
+  // ── T3 visual: 12 colored boxes ───────────────────────────
+  if (flag && flag.result && months && months.length) {
+    const winLen  = Math.min(months.length, 12);
+    const startMi = months.length - winLen; // absolute month index of first box
+    const res     = flag.result.res;
+
+    // Per-box background: determine which T3 window(s) each position belongs to
+    function boxBg(j) {
+      const inCurrent = j >= winLen - 3;               // t3Indices
+      const inPrior   = j >= winLen - 4 && j <= winLen - 2; // t3PriorIndices
+      if (inCurrent && inPrior)
+        return 'linear-gradient(135deg,var(--blue) 50%,var(--orange) 50%)';
+      if (inCurrent) return 'var(--blue)';
+      if (inPrior)   return 'var(--orange)';
+      return 'var(--bg-elevated)';
+    }
+
+    html += '<div style="margin-bottom:16px;">';
+    html += '<div style="font-family:var(--font-display);font-size:9px;font-weight:700;letter-spacing:1px;color:var(--text-muted);text-transform:uppercase;margin-bottom:8px;">T3 Rolling Window</div>';
+    html += '<div style="display:flex;gap:3px;align-items:flex-end;">';
+
+    for (let j = 0; j < winLen; j++) {
+      const mi    = startMi + j;
+      const entry = res[mi];
+      const v     = entry?.v;
+      const bg    = boxBg(j);
+      const label = (months[mi] || '').split(' ')[0]; // month abbrev only
+      const valStr = v != null ? _fmtAmt(v) : '';
+
+      html +=
+        '<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;">' +
+          '<div style="font-family:var(--font-display);font-size:8px;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:34px;text-align:center;">' + valStr + '</div>' +
+          '<div style="height:28px;width:100%;border-radius:3px;background:' + bg + ';"></div>' +
+          '<div style="font-family:var(--font-display);font-size:8px;color:var(--text-muted);">' + label + '</div>' +
+        '</div>';
+    }
+
+    html += '</div>'; // flex row
+
+    // Legend
+    html +=
+      '<div style="display:flex;gap:12px;margin-top:8px;">' +
+        '<div style="display:flex;align-items:center;gap:4px;font-family:var(--font-display);font-size:9px;color:var(--text-muted);">' +
+          '<span style="width:10px;height:10px;background:var(--blue);display:inline-block;border-radius:2px;"></span>T3 current</div>' +
+        '<div style="display:flex;align-items:center;gap:4px;font-family:var(--font-display);font-size:9px;color:var(--text-muted);">' +
+          '<span style="width:10px;height:10px;background:var(--orange);display:inline-block;border-radius:2px;"></span>T3 prior</div>' +
+        '<div style="display:flex;align-items:center;gap:4px;font-family:var(--font-display);font-size:9px;color:var(--text-muted);">' +
+          '<span style="width:10px;height:10px;background:var(--bg-elevated);border:1px solid var(--border);display:inline-block;border-radius:2px;"></span>T12 baseline</div>' +
+      '</div>';
+
+    html += '</div>'; // T3 section
+  }
+
+  // ── Driver breakdown table ────────────────────────────────
+  if (metricBreakdown && metricBreakdown.length) {
+    const thStyle = 'padding:5px 8px;text-align:right;font-family:var(--font-display);font-size:9px;font-weight:700;letter-spacing:0.5px;color:var(--text-muted);text-transform:uppercase;border-bottom:1px solid var(--border);white-space:nowrap;';
+    const thLeft  = thStyle.replace('text-align:right', 'text-align:left');
+    const tdStyle = 'padding:5px 8px;text-align:right;font-family:var(--font-display);font-size:10px;color:var(--text-secondary);border-bottom:1px solid var(--border);white-space:nowrap;';
+    const tdLeft  = tdStyle.replace('text-align:right', 'text-align:left') + 'color:var(--text-primary);max-width:130px;overflow:hidden;text-overflow:ellipsis;';
+    const tdBold  = tdStyle + 'font-weight:700;color:var(--text-primary);border-bottom:none;border-top:2px solid var(--border);';
+    const tdBoldL = tdBold.replace('text-align:right', 'text-align:left');
+
+    html += '<div style="margin-bottom:16px;">';
+    html += '<div style="font-family:var(--font-display);font-size:9px;font-weight:700;letter-spacing:1px;color:var(--text-muted);text-transform:uppercase;margin-bottom:8px;">Driver Breakdown</div>';
+    html += '<div style="overflow-x:auto;">';
+    html += '<table style="width:100%;border-collapse:collapse;">';
+    html += '<thead><tr>';
+    html += '<th style="' + thLeft  + '">Metric</th>';
+    html += '<th style="' + thStyle + '">T3 Current</th>';
+    html += '<th style="' + thStyle + '">T3 Prior</th>';
+    html += '<th style="' + thStyle + '">T12</th>';
+    html += '</tr></thead><tbody>';
+
+    let sumCurrent = 0, sumPrior = 0, sumT12 = 0;
+    let hasPrior = false, hasT12 = false;
+
+    for (const m of metricBreakdown) {
+      const cur = m.T3current ?? m.T3_current ?? null;
+      const pri = m.T3prior   ?? m.T3_prior   ?? null;
+      const t12 = m.T12       ?? null;
+      if (cur != null) { sumCurrent += cur; }
+      if (pri != null) { sumPrior   += pri; hasPrior = true; }
+      if (t12 != null) { sumT12     += t12; hasT12   = true; }
+      const diff = cur != null && pri != null ? cur - pri : null;
+      const curColor = diff == null ? 'color:var(--text-secondary)' : diff > 0 ? 'color:var(--green)' : 'color:var(--red)';
+      html += '<tr>';
+      html += '<td style="' + tdLeft  + '">' + (m.name || '') + '</td>';
+      html += '<td style="' + tdStyle + ';' + curColor + '">' + (cur != null ? _fmtAmt(cur) : '\u2014') + '</td>';
+      html += '<td style="' + tdStyle + '">' + (pri != null ? _fmtAmt(pri) : '\u2014') + '</td>';
+      html += '<td style="' + tdStyle + '">' + (t12 != null ? _fmtAmt(t12) : '\u2014') + '</td>';
+      html += '</tr>';
+    }
+
+    if (metricBreakdown.length > 1) {
+      html += '<tr>';
+      html += '<td style="' + tdBoldL + '">Total</td>';
+      html += '<td style="' + tdBold  + '">' + _fmtAmt(sumCurrent) + '</td>';
+      html += '<td style="' + tdBold  + '">' + (hasPrior ? _fmtAmt(sumPrior) : '\u2014') + '</td>';
+      html += '<td style="' + tdBold  + '">' + (hasT12   ? _fmtAmt(sumT12)   : '\u2014') + '</td>';
+      html += '</tr>';
+    }
+
+    html += '</tbody></table></div></div>'; // end table section
+  }
+
+  // ── Reasoning text ────────────────────────────────────────
+  if (apiResponse?.reasoning) {
+    html +=
+      '<div style="margin-bottom:16px;">' +
+        '<div style="font-family:var(--font-display);font-size:9px;font-weight:700;letter-spacing:1px;color:var(--text-muted);text-transform:uppercase;margin-bottom:8px;">Analysis</div>' +
+        '<div style="font-family:var(--font-body,var(--font-display));font-size:11px;color:var(--text-primary);line-height:1.7;">' +
+          apiResponse.reasoning.replace(/\n/g, '<br>') +
+        '</div>' +
+      '</div>';
+  }
+
+  body.innerHTML = html;
+}
