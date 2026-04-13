@@ -66,6 +66,69 @@ function parseMonthLabel(label) {
   return { month: mo + 1, year: yr, date: new Date(yr, mo, 1) };
 }
 
+async function fetchFREDSeries(seriesId, startDate, endDate) {
+  try {
+    const url = `https://api.stlouisfed.org/fred/series/observations?series_id=${seriesId}&observation_start=${startDate}&observation_end=${endDate}&api_key=${process.env.FRED_KEY}&file_type=json`;
+    const res = await fetch(url);
+    const data = await res.json();
+    const result = {};
+    (data.observations || []).forEach(o => {
+      const d = new Date(o.date);
+      const label = `${MONTH_NAMES[d.getMonth()]} ${d.getFullYear()}`;
+      result[label] = parseFloat(o.value);
+    });
+    return result;
+  } catch(e) { return {}; }
+}
+
+function generateReasoning(data) {
+  const { categoryName, section, monthLabel, stateAbbr, dominantDriver, dominantPct, topDrivers, compositionType, trendType, portfolioContext, externalContext, seasonalPattern, flag } = data;
+  const isIncome = section === 'INCOME';
+  const fmt = n => '$' + Math.round(Math.abs(n || 0)).toLocaleString();
+  const sentences = [];
+  const triggeredByPrior = flag.flaggedByPrior;
+  const triggeredByT12 = flag.flaggedByT12;
+  const conflicting = flag.conflicting;
+  if (triggeredByPrior && triggeredByT12 && !conflicting) {
+    sentences.push(`${categoryName} is running ${fmt(Math.abs(flag.T3_current - flag.T3_prior))} above the prior quarter and ${fmt(Math.abs(flag.T3_current - flag.T12))} above the trailing 12-month baseline — both momentum and structural drift are elevated.`);
+  } else if (triggeredByPrior && !triggeredByT12) {
+    const dir = flag.T3_current > flag.T3_prior ? 'above' : 'below';
+    sentences.push(`${categoryName}'s run rate shifted ${fmt(Math.abs(flag.T3_current - flag.T3_prior))} ${dir} the prior quarter — a momentum-driven change.`);
+  } else if (triggeredByT12 && !triggeredByPrior) {
+    const dir = flag.T3_current > flag.T12 ? 'above' : 'below';
+    sentences.push(`${categoryName}'s current run rate is ${fmt(Math.abs(flag.T3_current - flag.T12))} ${dir} the trailing 12-month baseline — a structural drift from the annual average.`);
+  } else if (conflicting) {
+    sentences.push(`${categoryName} shows conflicting signals — the quarterly trend and annual baseline are pointing in opposite directions.`);
+  }
+  if (topDrivers.length >= 1) {
+    const driverParts = topDrivers.slice(0, 3).map(d => `${d.name} (${fmt(d.absMovement)} ${d.direction === 'up' ? 'higher' : 'lower'})`);
+    const reference = triggeredByT12 && !triggeredByPrior ? 'vs the annual baseline' : 'vs the prior quarter';
+    if (dominantPct && Math.abs(dominantPct) >= 60 && topDrivers.length === 1) {
+      sentences.push(`Primary driver: ${driverParts[0]} ${reference}, accounting for ${Math.abs(dominantPct)}% of the shift.`);
+    } else {
+      sentences.push(`Primary drivers ${reference}: ${driverParts.join('; ')}.`);
+    }
+  }
+  if (trendType === 'accelerating') sentences.push(`The gap is widening each quarter.`);
+  else if (trendType === 'decelerating') sentences.push(`The gap is narrowing — momentum is slowing.`);
+  if (seasonalPattern?.recurring) sentences.push(`This pattern has appeared in ${monthLabel.split(' ')[0]} in prior years (${seasonalPattern.years.join(', ')}) — a likely seasonal component.`);
+  const sameState = portfolioContext.filter(p => p.locationProximity === 'same-state');
+  const sameRegion = portfolioContext.filter(p => p.locationProximity === 'same-region');
+  if (sameState.length >= 2) sentences.push(`${sameState.length} other ${stateAbbr} properties show similar movement — likely a state-level driver.`);
+  else if (sameRegion.length >= 2) sentences.push(`${sameRegion.length} regional properties show similar movement — consistent with a broader trend.`);
+  if (sentences.length < 3) {
+    const { stateUR, mortgage30, hdd, cdd, energyCPI } = externalContext || {};
+    if (isIncome && stateUR != null) sentences.push(`${stateAbbr} unemployment at ${stateUR.toFixed(1)}% ${stateUR < 4 ? '— tight labor market supporting demand' : stateUR > 6 ? '— elevated unemployment may be pressuring demand' : '— moderate labor conditions'}.`);
+    else if (!isIncome && hdd != null && hdd > 400) sentences.push(`${hdd} heating degree days in ${stateAbbr} — cold weather driving operating costs.`);
+    else if (!isIncome && cdd != null && cdd > 150) sentences.push(`${cdd} cooling degree days — summer heat elevating utility demand.`);
+    else if (!isIncome && energyCPI != null && energyCPI > 300) sentences.push(`Energy CPI at ${energyCPI.toFixed(1)} — elevated energy costs contributing to expense pressure.`);
+  }
+  let result = sentences.join(' ');
+  const words = result.split(' ');
+  if (words.length > 210) result = words.slice(0, 200).join(' ') + '…';
+  return result || `${categoryName} moved vs the prior quarter in ${monthLabel}. Review individual metric breakdown above for details.`;
+}
+
 module.exports = async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
@@ -149,5 +212,128 @@ module.exports = async function handler(req, res) {
     else trendType = 'volatile';
   }
 
-  return res.status(200).json({ ok: true, t3Drivers, t12Drivers, dominantDriver, topDrivers, compositionType, trendType });
+  // ── Step 1: FRED external context ───────────────────────────────────────
+  const externalContext = {};
+  try {
+    const [fedfunds, rentCPI, stateUR, energyCPI, mortgage30] = await Promise.all([
+      fetchFREDSeries('FEDFUNDS', startDate, endDate),
+      fetchFREDSeries('CUUR0000SEHA', startDate, endDate),
+      fetchFREDSeries(FRED_UR_MAP[stateAbbr] || 'UNRATE', startDate, endDate),
+      fetchFREDSeries('CUUR0000SEHE', startDate, endDate),
+      fetchFREDSeries('MORTGAGE30US', startDate, endDate),
+    ]);
+    externalContext.fedfunds    = fedfunds[monthLabel];
+    externalContext.rentCPI     = rentCPI[monthLabel];
+    externalContext.stateUR     = stateUR[monthLabel];
+    externalContext.energyCPI   = energyCPI[monthLabel];
+    externalContext.mortgage30  = mortgage30[monthLabel];
+  } catch(e) {}
+
+  // ── Step 2: Weather ──────────────────────────────────────────────────────
+  try {
+    const coords = STATE_CENTROIDS[stateAbbr];
+    if (coords) {
+      const today = new Date().toISOString().slice(0, 10);
+      const cappedEnd = endDate > today ? today : endDate;
+      const weatherRes = await fetch(
+        `https://archive-api.open-meteo.com/v1/archive?latitude=${coords[0]}&longitude=${coords[1]}&start_date=${startDate}&end_date=${cappedEnd}&daily=temperature_2m_max,temperature_2m_min&timezone=auto&temperature_unit=fahrenheit`
+      );
+      const weatherData = await weatherRes.json();
+      const dates = weatherData?.daily?.time || [];
+      const maxT  = weatherData?.daily?.temperature_2m_max || [];
+      const minT  = weatherData?.daily?.temperature_2m_min || [];
+      let hdd = 0, cdd = 0;
+      dates.forEach((dateStr, i) => {
+        const d = new Date(dateStr);
+        const label = `${MONTH_NAMES[d.getMonth()]} ${d.getFullYear()}`;
+        if (label === monthLabel) {
+          const avg = ((maxT[i] || 0) + (minT[i] || 0)) / 2;
+          hdd += Math.max(0, 65 - avg);
+          cdd += Math.max(0, avg - 65);
+        }
+      });
+      externalContext.hdd = Math.round(hdd);
+      externalContext.cdd = Math.round(cdd);
+    }
+  } catch(e) {}
+
+  // ── Step 3: D1 portfolio context + seasonal pattern ──────────────────────
+  let portfolioContext = [];
+  let seasonalPattern  = null;
+  try {
+    const allSessions = await d1(
+      "SELECT session_data FROM sessions WHERE platform='asset' AND id NOT LIKE '%@@%'",
+      []
+    );
+    const samePropertySessions  = [];
+    const otherPropertySessions = [];
+    allSessions.forEach(row => {
+      try {
+        const s = JSON.parse(row.session_data);
+        if ((s.fileName || '') === propertyName) samePropertySessions.push(s);
+        else otherPropertySessions.push(s);
+      } catch(e) {}
+    });
+
+    // Seasonal — same property, same calendar month, prior years
+    const sameMonthPriorYears = [];
+    samePropertySessions.forEach(s => {
+      (s.results || []).forEach(metric => {
+        if (!(metricBreakdown || []).some(m => m.name === metric.name)) return;
+        (metric.res || []).forEach((r, i) => {
+          if (r.st !== 'anom' && r.st !== 'seas') return;
+          const ml = (s.months || [])[i] || '';
+          const p  = parseMonthLabel(ml);
+          if (p && p.month === parsed.month && p.year < parsed.year) {
+            sameMonthPriorYears.push({ year: p.year, metricName: metric.name });
+          }
+        });
+      });
+    });
+    if (sameMonthPriorYears.length >= 2) {
+      seasonalPattern = {
+        recurring:   true,
+        occurrences: sameMonthPriorYears.length,
+        years:       [...new Set(sameMonthPriorYears.map(s => s.year))].sort(),
+      };
+    }
+
+    // Portfolio — other properties, same month
+    otherPropertySessions.forEach(s => {
+      const matchingAnomalies = [];
+      (s.results || []).forEach(metric => {
+        if (!(metricBreakdown || []).some(m => m.name === metric.name)) return;
+        (metric.res || []).forEach((r, i) => {
+          if (r.st !== 'anom' && r.st !== 'seas') return;
+          const ml = (s.months || [])[i] || '';
+          if (ml === monthLabel) matchingAnomalies.push({ metricName: metric.name });
+        });
+      });
+      if (matchingAnomalies.length > 0) {
+        const propRegion    = getRegion(s.state || '');
+        const currentRegion = getRegion(stateAbbr);
+        portfolioContext.push({
+          propertyName:      s.fileName || '',
+          stateAbbr:         s.state || '',
+          locationProximity: s.state === stateAbbr ? 'same-state'
+            : propRegion === currentRegion ? 'same-region' : 'different-region',
+          anomalyCount: matchingAnomalies.length,
+        });
+      }
+    });
+  } catch(e) {}
+
+  // ── Step 4: Generate reasoning and return ────────────────────────────────
+  const reasoning = generateReasoning({
+    categoryName, section, monthLabel, stateAbbr,
+    dominantDriver, dominantPct, topDrivers, compositionType,
+    trendType, portfolioContext, externalContext, seasonalPattern, flag,
+  });
+
+  return res.status(200).json({
+    categoryName, section, monthLabel, stateAbbr, propertyName,
+    t3Drivers, t12Drivers, dominantDriver, dominantPct, topDrivers,
+    compositionType, trendType, portfolioContext, externalContext,
+    seasonalPattern, flag, reasoning,
+  });
 };
