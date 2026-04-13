@@ -28,8 +28,8 @@ function analyzeAsset(name, allV, months, isInc, pp, skip) {
   if (phases && phases.length > 1) return analyzeAssetStructural(name, allV, months, isInc, pp, skip, phases);
 
   const { t: mt, oi } = cl;
-  const cv = mt === "continuous" ? vals.slice(oi) : vals;
-  const nv = normVol(vals, mt === "continuous" ? oi : 0);
+  const cv = vals.slice(oi);
+  const nv = normVol(vals, oi);
 
   // Build base result array — skip/pre cells get their markers,
   // all other cells start as "norm" (no anomaly)
@@ -40,7 +40,7 @@ function analyzeAsset(name, allV, months, isInc, pp, skip) {
       res.push({ mi: i, v, z: null, st: "skip", at: null, mat: false, seas: false, recur: false, zm: null, chv: null });
       continue;
     }
-    if (mt === "continuous" && i < oi) {
+    if (i < oi) {
       res.push({ mi: i, v, z: null, st: "pre", at: null, mat: false, seas: false, recur: false, zm: null, chv: null });
       continue;
     }
@@ -177,15 +177,12 @@ function analyzeAssetStructural(name,allV,months,isInc,pp,skip,phases){
                 flaggedByPrior,flaggedByT12,conflicting,T12};
       }
     }else{
-      // Z-score + cap-rate dual filter
+      // Z-score + cap-rate dual filter — use only this phase's values for statistics
       const pVals=vals.slice(pOi,pEnd+1);
-      const cv=pi===0?vals.slice(0,pEnd+1):pVals;
-      const nv=normVol(pVals,0),th=thresh("sporadic",cv,nv);
-      const m=mn(cv),s=sdev(cv);
-      const startIdx=pi===0?0:pOi;
-      for(let i=startIdx;i<=pEnd;i++){
-        if(res[i].st==="skip")continue;
-        if(res[i].st==="pre")res[i]={...res[i],st:"norm"};
+      const nv=normVol(pVals,0),th=thresh("sporadic",pVals,nv);
+      const m=mn(pVals),s=sdev(pVals);
+      for(let i=pOi;i<=pEnd;i++){
+        if(res[i].st==="skip"||res[i].st==="pre")continue;
         if(s>0){
           const v=allV[i],z=(v-m)/s,capImpact=Math.abs(v)*12;
           if(Math.abs(z)>th&&capImpact>=matTh){
