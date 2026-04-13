@@ -206,6 +206,66 @@ function renderReasonPanel(data){
   if(data.confidenceNotes&&data.confidenceNotes.length){h+='<div class="ai-card"><div class="ai-card-metric" style="margin-bottom:6px;font-size:11px;color:#a78bfa;">Confidence Adjustments</div>';data.confidenceNotes.forEach(n=>{const col=n.delta>0?"#4ade80":"#f87171";h+='<div style="font-size:10px;color:'+col+';margin:2px 0;">'+(n.delta>0?"+":"")+n.delta+"% \u2014 "+n.text+"</div>";});h+="</div>";}
   if(data.corroboratingNote)h+='<div class="ai-card" style="border-color:#3b1f7a;"><div class="ai-card-primary" style="color:#c4b5fd;">\ud83d\udd17 '+data.corroboratingNote+"</div></div>";
   if(data.dataSources&&data.dataSources.length){h+='<div class="ai-card"><div class="ai-card-metric" style="margin-bottom:6px;font-size:11px;color:#a78bfa;">Data Sources</div>';data.dataSources.forEach(s=>{h+='<div style="font-size:9px;color:#71717a;margin:2px 0;display:flex;justify-content:space-between;"><span>'+s.label+'</span><span style="color:#a1a1aa;">'+s.value+' <span style="color:#52525b;">('+s.period+")</span></span></div>";});h+="</div>";}
+
+  // ── REASON BOXES ──
+  let extHtml = '<div style="border-top:1px solid var(--border);margin-top:14px;padding-top:14px;">';
+
+  // Primary box
+  extHtml += '<div style="border-left:3px solid var(--green);padding:10px 14px;margin-bottom:8px;background:var(--bg-elevated);border-radius:var(--radius);">';
+  extHtml += '<div style="font-family:var(--font-display);font-size:10px;font-weight:700;color:var(--green);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">Primary Reason</div>';
+  extHtml += '<div style="font-size:11px;color:var(--text-primary);line-height:1.6;">' + (data.enrichedPrimary || data.primary?.label || '') + '</div>';
+  extHtml += '</div>';
+
+  // Alt boxes — colors: orange, purple, teal
+  const altColors = ['var(--orange)','var(--purple)','var(--teal)'];
+  const altLabels = ['Alt 1','Alt 2','Alt 3'];
+  const altsExt = data.enrichedAlternatives || data.alternatives || [];
+  altsExt.slice(0,3).forEach((alt,i) => {
+    const preview = String(alt).slice(0,80) + (String(alt).length > 80 ? '…' : '');
+    extHtml += '<details style="border-left:3px solid '+altColors[i]+';padding:8px 14px;margin-bottom:6px;background:var(--bg-elevated);border-radius:var(--radius);">';
+    extHtml += '<summary style="font-family:var(--font-display);font-size:10px;font-weight:700;color:'+altColors[i]+';text-transform:uppercase;letter-spacing:1px;cursor:pointer;list-style:none;">';
+    extHtml += altLabels[i] + ' <span style="font-weight:400;color:var(--text-muted);font-size:10px;">— ' + preview + '</span></summary>';
+    extHtml += '<div style="font-size:11px;color:var(--text-primary);line-height:1.6;margin-top:8px;">' + alt + '</div>';
+    extHtml += '</details>';
+  });
+
+  // ── FIRED RULES ──
+  if (data.firedByTier) {
+    const tierColors = {tier1:'var(--green)',tier2:'var(--purple)',tier3:'var(--orange)',tier4:'var(--text-muted)'};
+    const tierLabels = {tier1:'Tier 1 — API Verified',tier2:'Tier 2 — Metric Specific',tier3:'Tier 3 — Data Pattern',tier4:'Tier 4 — Generic'};
+    extHtml += '<details style="margin-bottom:8px;"><summary style="font-family:var(--font-display);font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;cursor:pointer;list-style:none;">Fired Rules</summary><div style="margin-top:8px;">';
+    ['tier1','tier2','tier3','tier4'].forEach(t => {
+      const rules = data.firedByTier[t];
+      if (!rules || !rules.length) return;
+      extHtml += '<div style="margin-bottom:6px;"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:'+tierColors[t]+';margin-right:6px;"></span>';
+      extHtml += '<span style="font-size:10px;font-weight:700;color:'+tierColors[t]+';">'+tierLabels[t]+'</span>';
+      rules.forEach(r => { extHtml += '<div style="font-size:10px;color:var(--text-muted);margin-left:18px;">• '+r+'</div>'; });
+      extHtml += '</div>';
+    });
+    extHtml += '</div></details>';
+  }
+
+  // ── CORROBORATING ANOMALIES ──
+  if (data.corroborating && data.corroborating.length) {
+    extHtml += '<details style="margin-bottom:8px;"><summary style="font-family:var(--font-display);font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;cursor:pointer;list-style:none;">Corroborating Anomalies</summary><div style="margin-top:8px;">';
+    data.corroborating.forEach(c => {
+      extHtml += '<div style="font-size:10px;color:var(--text-secondary);margin-bottom:4px;">'+c.metricName+' — '+(c.monthLabel||'')+'<span style="background:var(--bg-elevated);color:var(--purple);font-size:9px;padding:1px 6px;border-radius:10px;margin-left:6px;">'+c.similarity+'% match</span></div>';
+    });
+    extHtml += '</div></details>';
+  }
+
+  // ── DATA SOURCES ──
+  if (data.dataSources && data.dataSources.length) {
+    extHtml += '<details style="margin-bottom:8px;"><summary style="font-family:var(--font-display);font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;cursor:pointer;list-style:none;">Data Sources ('+data.dataSources.length+')</summary><div style="margin-top:8px;">';
+    data.dataSources.forEach(s => {
+      extHtml += '<div style="font-size:9px;color:var(--text-muted);margin:2px 0;display:flex;justify-content:space-between;">';
+      extHtml += '<span>'+s.label+'</span><span style="color:var(--text-secondary);">'+s.value+' <span style="color:var(--text-muted);">('+s.period+')</span></span></div>';
+    });
+    extHtml += '</div></details>';
+  }
+
+  extHtml += '</div>';
+  h += extHtml;
   return h;
 }
 
@@ -292,3 +352,5 @@ window.addEventListener('beforeunload',function(){
     if(nm)localStorage.setItem('aiCacheBak_'+sessionId(nm,isComp?'comparison':'analyzer'),JSON.stringify(window._aiCache));
   }catch(e){}
 });
+
+window.renderReasonPanel = renderReasonPanel;

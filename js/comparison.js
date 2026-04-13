@@ -40,6 +40,11 @@ function runComp(){
   }
 
   let aligned;
+  if (PLATFORM === 'asset') {
+    try { aligned = alignMultiData(compProperties); } catch(ex) { document.getElementById('compError').textContent=ex.message; document.getElementById('compError').style.display=''; return; }
+    renderAMComparison(aligned, aligned[0].alignedData.months, null);
+    return;
+  }
   // Reconstruct raw metrics from saved results for properties loaded via Analyzer session history.
   // p.data.metrics may be an empty stub when DATA was null at save time; p.results has the
   // full analysis. Rebuild metrics so alignMultiData has real months+values to work with.
@@ -229,6 +234,239 @@ function renderComp(){
       tbody.appendChild(sentinel);
       observer.observe(sentinel);
     }
+  });
+}
+
+function renderAMComparison(aligned, months, purchasePrice) {
+  if (window._amCompViewMode === undefined) window._amCompViewMode = 'metric';
+  if (window._amCompLimit    === undefined) window._amCompLimit    = 25;
+
+  // Render into a sub-container inside #compMode (create/reuse)
+  let target = document.getElementById('amCompResult');
+  if (!target) {
+    target = document.createElement('div');
+    target.id = 'amCompResult';
+    target.style.cssText = 'margin-top:16px;';
+    const wrap = document.getElementById('compTableWrap');
+    if (wrap) wrap.parentElement.insertBefore(target, wrap);
+  }
+  target.style.display = '';
+  document.getElementById('compTableWrap').classList.add('hidden');
+
+  // Build flags per property
+  const propFlags = aligned.map(p => {
+    const results   = p.results || [];
+    const propMonths = (p.sliced || p.alignedData).months || months;
+    return {
+      prop:     p,
+      months:   propMonths,
+      flags:    window._amCompViewMode === 'category'
+                  ? _buildCategoryFlags(results, propMonths)
+                  : _buildMetricFlags(results, propMonths),
+    };
+  });
+
+  // Delta map — matching names whose movement delta exceeds threshold
+  const ppA    = purchasePrice != null ? purchasePrice : getP('compPP_' + (aligned[0]?.id || ''));
+  const matTh  = (ppA || 0) * 0.001;
+  const deltaMap = new Map();
+  if (propFlags.length >= 2) {
+    for (const fA of propFlags[0].flags) {
+      const fB = propFlags[1].flags.find(f => f.name === fA.name);
+      if (!fB) continue;
+      const diff = fA.movement - fB.movement;
+      if (Math.abs(diff) >= matTh) deltaMap.set(fA.name, { fA, fB, diff });
+    }
+  }
+
+  const baseBtn = 'font-family:var(--font-display);font-size:10px;padding:5px 11px;border-radius:var(--radius);cursor:pointer;letter-spacing:0.3px;transition:opacity 0.15s;';
+  function actSty(on) {
+    return on
+      ? 'background:var(--accent);border:1px solid var(--accent);color:var(--bg-base);'
+      : 'background:var(--bg-elevated);border:1px solid var(--border);color:var(--text-muted);';
+  }
+
+  // ── Toolbar ───────────────────────────────────────────────
+  let html = '<div style="display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:18px;">';
+  html += '<div style="display:flex;gap:4px;">';
+  html += `<button class="am-cmp-toggle" data-view="metric"   style="${baseBtn}${actSty(window._amCompViewMode==='metric')}">&#x1F4CA; View by Metric</button>`;
+  html += `<button class="am-cmp-toggle" data-view="category" style="${baseBtn}${actSty(window._amCompViewMode==='category')}">&#x1F5C2; View by Category</button>`;
+  html += '</div><div style="display:flex;align-items:center;gap:4px;margin-left:auto;">';
+  html += '<span style="font-family:var(--font-display);font-size:9px;color:var(--text-muted);letter-spacing:0.5px;">SHOW</span>';
+  for (const lv of [10, 25, 50, 100]) {
+    html += `<button class="am-cmp-lim" data-limit="${lv}" style="${baseBtn}${actSty(window._amCompLimit===lv)}">${lv}</button>`;
+  }
+  html += '</div></div>';
+
+  // ── Two-column property grid ──────────────────────────────
+  html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:24px;">';
+
+  for (const pf of propFlags) {
+    const p    = pf.prop;
+    const disp = pf.flags.slice(0, window._amCompLimit);
+    const nm   = document.getElementById('compName_' + p.id)?.value || p.label;
+
+    html += '<div>';
+    html +=
+      '<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid var(--border);">' +
+      `<span style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:4px;background:${p.color};font-family:var(--font-display);font-size:10px;font-weight:700;color:#fff;">${p.label}</span>` +
+      `<span style="font-family:var(--font-display);font-size:12px;font-weight:700;color:var(--text-primary);">${nm}</span>` +
+      `<span style="font-family:var(--font-display);font-size:9px;color:var(--text-muted);margin-left:auto;">${pf.flags.length} flagged</span>` +
+      '</div>';
+
+    if (!disp.length) {
+      html += '<div style="font-family:var(--font-display);font-size:11px;color:var(--text-muted);padding:20px 0;text-align:center;">No material anomalies.</div>';
+    }
+
+    html += '<div style="display:flex;flex-direction:column;gap:10px;">';
+    disp.forEach((flag, idx) => {
+      const bc    = _borderColor(flag);
+      const mc    = _movementColor(flag);
+      const arrow = flag.at === 'pos' ? '\u2191' : flag.at === 'neg' ? '\u2193' : '\u21C5';
+      const delta = deltaMap.get(flag.name);
+      html +=
+        `<div class="am-card" data-propid="${p.id}" data-idx="${idx}"` +
+        ` style="background:var(--bg-elevated);border:1px solid var(--border);border-left:4px solid ${bc};border-radius:var(--radius);padding:12px;display:flex;flex-direction:column;gap:6px;">` +
+        `<div class="am-card-category" style="font-family:var(--font-display);font-size:9px;color:var(--text-muted);letter-spacing:0.6px;text-transform:uppercase;">${flag.section}</div>` +
+        `<div class="am-card-name" style="font-family:var(--font-display);font-size:11px;font-weight:700;color:var(--text-primary);">${flag.name}` +
+          (delta ? ' <span style="font-size:9px;color:var(--purple);">\u0394</span>' : '') +
+        '</div>' +
+        `<div class="am-card-month" style="font-family:var(--font-display);font-size:10px;color:var(--text-muted);">${flag.worstFlagMonth}</div>` +
+        `<div class="am-card-movement" style="font-family:var(--font-display);font-size:14px;font-weight:800;color:${mc};">${arrow} ${_fmtAmt(flag.movement)}</div>` +
+        `<div class="am-card-trigger" style="font-family:var(--font-display);font-size:9px;color:var(--text-muted);letter-spacing:0.4px;">${_triggerLabel(flag)}</div>` +
+        '<div style="display:flex;gap:5px;margin-top:3px;">' +
+        `<button class="am-cmp-explain" data-propid="${p.id}" data-idx="${idx}" style="flex:1;${baseBtn}background:var(--accent);border:1px solid var(--accent);color:var(--bg-base);font-weight:700;font-size:9px;">View Explanation</button>` +
+        `<button class="am-cmp-deep"    data-propid="${p.id}" data-idx="${idx}" style="${baseBtn}background:var(--bg-base);border:1px solid var(--border);color:var(--text-muted);font-size:9px;">Deep Research</button>` +
+        '</div></div>';
+    });
+    html += '</div></div>'; // close cards list + property column
+  }
+
+  html += '</div>'; // close two-column grid
+
+  // ── Delta cards ───────────────────────────────────────────
+  if (deltaMap.size) {
+    html += '<div style="margin-top:8px;">';
+    html +=
+      '<div style="font-family:var(--font-display);font-size:9px;font-weight:700;letter-spacing:1px;' +
+      'color:var(--purple);text-transform:uppercase;margin-bottom:12px;">\u0394 Delta Metrics</div>';
+    html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;">';
+    for (const [name, { fA, fB, diff }] of deltaMap) {
+      const mc    = diff > 0 ? 'var(--green)' : 'var(--red)';
+      const arrow = diff > 0 ? '\u2191' : '\u2193';
+      html +=
+        '<div class="am-delta-card" style="background:var(--bg-elevated);border:1px solid var(--border);' +
+        'border-left:4px solid var(--purple);border-radius:var(--radius);padding:12px;display:flex;flex-direction:column;gap:5px;">' +
+        '<div style="font-family:var(--font-display);font-size:9px;color:var(--purple);letter-spacing:0.5px;text-transform:uppercase;">\u0394 Delta</div>' +
+        `<div style="font-family:var(--font-display);font-size:11px;font-weight:700;color:var(--text-primary);">${name}</div>` +
+        `<div style="font-family:var(--font-display);font-size:9px;color:var(--text-muted);">${aligned[0].label} vs ${aligned[1].label}</div>` +
+        `<div style="font-family:var(--font-display);font-size:14px;font-weight:800;color:${mc};">${arrow} ${_fmtAmt(Math.abs(diff))}</div>` +
+        `<div style="font-family:var(--font-display);font-size:9px;color:var(--text-muted);">${_fmtAmt(fA.movement)} vs ${_fmtAmt(fB.movement)}</div>` +
+        '</div>';
+    }
+    html += '</div></div>';
+  }
+
+  target.innerHTML = html;
+
+  // Store for handlers
+  target._amCmpPropFlags = propFlags;
+  target._amCmpAligned   = aligned;
+
+  // ── Event wiring ──────────────────────────────────────────
+  target.querySelectorAll('.am-cmp-toggle').forEach(btn => {
+    btn.addEventListener('click', () => {
+      window._amCompViewMode = btn.dataset.view;
+      renderAMComparison(aligned, months, purchasePrice);
+    });
+  });
+
+  target.querySelectorAll('.am-cmp-lim').forEach(btn => {
+    btn.addEventListener('click', () => {
+      window._amCompLimit = parseInt(btn.dataset.limit, 10);
+      renderAMComparison(aligned, months, purchasePrice);
+    });
+  });
+
+  // "View Explanation" — reads compState_{id} and compCity_{id}
+  target.querySelectorAll('.am-cmp-explain').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const propId = btn.dataset.propid;
+      const idx    = parseInt(btn.dataset.idx, 10);
+      const pf     = propFlags.find(x => String(x.prop.id) === propId);
+      if (!pf) return;
+      const flag = pf.flags[idx];
+      if (!flag) return;
+
+      const stateVal  = document.getElementById('compState_' + propId)?.value || '';
+      const stateAbbr = (typeof Context !== 'undefined' && Context.STATE_ABBR)
+        ? (Context.STATE_ABBR[stateVal] || '') : '';
+      const city         = document.getElementById('compCity_' + propId)?.value || '';
+      const propertyName = document.getElementById('compName_'  + propId)?.value || pf.prop.label;
+      const pp           = purchasePrice != null ? purchasePrice : getP('compPP_' + propId);
+      const breakdown    = _metricBreakdownForFlag(flag);
+
+      if (typeof renderAMDetailPanel === 'function') renderAMDetailPanel(null, flag, breakdown, pf.months);
+
+      try {
+        const resp = await fetchAMReasoning(flag, breakdown, stateAbbr, city, propertyName, pp, pf.months);
+        if (typeof renderAMDetailPanel === 'function') renderAMDetailPanel(resp, flag, breakdown, pf.months);
+      } catch (e) {
+        console.warn('[am-cmp-explain] failed:', e);
+      }
+    });
+  });
+
+  // "Deep Research" — same pattern as analyzer mode
+  target.querySelectorAll('.am-cmp-deep').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const propId = btn.dataset.propid;
+      const idx    = parseInt(btn.dataset.idx, 10);
+      const pf     = propFlags.find(x => String(x.prop.id) === propId);
+      if (!pf) return;
+      const flag = pf.flags[idx];
+      if (!flag) return;
+      const r = flag.result?.res?.[flag.worstIdx];
+      if (!r) return;
+
+      const panel = document.getElementById('sidePanel');
+      const body  = document.getElementById('sidePanelBody');
+      if (!panel || !body) return;
+
+      panel.classList.remove('hidden');
+      body.innerHTML =
+        '<div style="margin-bottom:12px;font-family:var(--font-display);font-size:13px;font-weight:700;color:var(--text-primary);">' +
+        flag.name + ' \u2014 ' + flag.worstFlagMonth + '</div>' +
+        '<div class="ai-loading"><span class="spinner"></span> Claude is analyzing\u2026</div>' +
+        '<div id="aiDeepResult"></div>';
+
+      const anomaly = {
+        metric: flag.name, month: flag.worstFlagMonth, value: r.v,
+        zScore: r.z != null ? r.z.toFixed(3) : null, method: r.zm,
+        direction: r.at === 'pos' ? 'positive' : 'negative',
+        isMaterial: r.mat, isSeasonal: r.st === 'seas', change: r.chv,
+        threshold: flag.result?.th, metricType: flag.result?.mt, section: flag.result?.sec,
+      };
+      const ctx    = typeof getAIContext    === 'function' ? getAIContext() : {};
+      const ctxStr = typeof buildDataContext === 'function' ? (window.cachedContext || buildDataContext()) : '';
+
+      fetch('/api/analyze-reasons', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({mode:'explain', context:ctxStr, anomaly, ...ctx}),
+      })
+      .then(res => { if(!res.ok) throw new Error('API error '+res.status); return res.json(); })
+      .then(data => {
+        const el = document.getElementById('aiDeepResult');
+        if (!el) return;
+        let h = '';
+        if (data.primaryReason) h += `<div class="ai-card"><div class="ai-card-primary"><strong>${data.primaryReason.category||''}:</strong> ${data.primaryReason.explanation||''}</div></div>`;
+        if (data.alternatives?.length) { h+='<div class="ai-card"><div class="ai-card-alts">'; data.alternatives.forEach((a,i)=>{h+=`<div><strong>${i+1}. ${a.category||''}:</strong> ${a.explanation||''}</div>`;}); h+='</div></div>'; }
+        if (data.recommendation) h += `<div class="ai-insight"><p><strong>Recommendation:</strong> ${data.recommendation}</p></div>`;
+        if (!h) h = `<div class="ai-card"><div class="ai-card-primary">${data.raw||JSON.stringify(data)}</div></div>`;
+        el.innerHTML = h;
+      })
+      .catch(e => { const el=document.getElementById('aiDeepResult'); if(el) el.innerHTML=`<div class="ai-error">Analysis failed: ${e.message}</div>`; });
+    });
   });
 }
 
