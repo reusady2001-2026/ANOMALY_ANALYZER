@@ -69,3 +69,366 @@ function groupByCategory(results) {
     return a.categoryName.localeCompare(b.categoryName);
   });
 }
+
+// ── module-level reverse lookup (built once) ──────────────────
+const _metricToCategory = (function() {
+  const m = new Map();
+  for (const [cat, metrics] of Object.entries(CATEGORY_MAP))
+    for (const name of metrics) m.set(name, cat);
+  return m;
+})();
+
+// ── private helpers ───────────────────────────────────────────
+
+function _fmtAmt(v) {
+  if (v == null) return '\u2014';
+  const abs = Math.abs(v);
+  const sign = v < 0 ? '-' : '';
+  if (abs >= 1000000) return sign + '$' + (abs / 1000000).toFixed(1) + 'M';
+  if (abs >= 1000)    return sign + '$' + (abs / 1000).toFixed(1) + 'k';
+  return sign + '$' + abs.toFixed(0);
+}
+
+function _borderColor(flag) {
+  if (flag.conflicting) return 'var(--orange)';
+  if (flag.at === 'pos') return 'var(--green)';
+  if (flag.at === 'neg') return 'var(--red)';
+  return 'var(--orange)'; // mixed (category view)
+}
+
+function _movementColor(flag) {
+  if (flag.at === 'pos') return 'var(--green)';
+  if (flag.at === 'neg') return 'var(--red)';
+  return 'var(--orange)';
+}
+
+function _triggerLabel(flag) {
+  const p = flag.flaggedByPrior, t = flag.flaggedByT12, c = flag.conflicting;
+  if (p && t && c) return 'T3 + T12 \u00b7 conflicting';
+  if (p && t)      return 'T3 + T12';
+  if (t)           return 'T12 drift';
+  return 'T3 momentum';
+}
+
+// Build a flag object for one metric result.
+// Returns null if the result has no material anomaly cells.
+function _metricFlag(result, months) {
+  let worstIdx = -1, worstMovement = 0;
+  for (const r of result.res) {
+    if (r.st !== 'anom') continue;
+    const movement = r.zm === 't3' ? Math.abs(r.chv || 0) : Math.abs(r.v || 0) * 12;
+    if (movement > worstMovement) { worstMovement = movement; worstIdx = r.mi; }
+  }
+  if (worstIdx < 0) return null;
+
+  const r   = result.res[worstIdx];
+  const n   = worstIdx;
+  const vals = result.res.map(rx => rx.v || 0);
+  const T3_current = n >= 2 ? (vals[n] + vals[n-1] + vals[n-2]) * 4 : (r.v || 0) * 12;
+  const T3_prior   = n >= 3 ? (vals[n-1] + vals[n-2] + vals[n-3]) * 4 : null;
+  const cat = _metricToCategory.get(result.name) || (result.isInc ? 'OTHER INCOME' : 'OTHER EXPENSES');
+
+  return {
+    name:           result.name,
+    section:        cat,
+    isInc:          result.isInc,
+    worstIdx:       n,
+    worstFlagMonth: months[n] || String(n),
+    worstMonthLabel:months[n] || String(n),
+    movement:       worstMovement,
+    at:             r.at,
+    flaggedByPrior: r.flaggedByPrior || false,
+    flaggedByT12:   r.flaggedByT12   || false,
+    conflicting:    r.conflicting    || false,
+    T12:            r.T12,
+    T3_current,
+    T3_prior,
+    zm:             r.zm,
+    result,
+  };
+}
+
+function _buildMetricFlags(results, months) {
+  const flags = [];
+  for (const result of results) {
+    if (!result) continue;
+    const f = _metricFlag(result, months);
+    if (f) flags.push(f);
+  }
+  return flags.sort((a, b) => b.movement - a.movement);
+}
+
+function _buildCategoryFlags(results, months) {
+  const metricFlags = _buildMetricFlags(results, months);
+  const catMap = new Map();
+  for (const f of metricFlags) {
+    if (!catMap.has(f.section)) catMap.set(f.section, []);
+    catMap.get(f.section).push(f);
+  }
+  const catFlags = [];
+  for (const [cat, flags] of catMap) {
+    const worst = flags.reduce((a, b) => a.movement > b.movement ? a : b);
+    const totalMovement = flags.reduce((s, f) => s + f.movement, 0);
+    const posCount = flags.filter(f => f.at === 'pos').length;
+    const negCount = flags.filter(f => f.at === 'neg').length;
+    const at = posCount > negCount ? 'pos' : negCount > posCount ? 'neg' : 'mixed';
+    catFlags.push({
+      name:           cat,
+      section:        cat,
+      isInc:          INCOME_CATEGORIES.has(cat),
+      worstIdx:       worst.worstIdx,
+      worstFlagMonth: worst.worstFlagMonth,
+      worstMonthLabel:worst.worstMonthLabel,
+      movement:       totalMovement,
+      at,
+      conflicting:    flags.some(f => f.conflicting),
+      flaggedByPrior: worst.flaggedByPrior,
+      flaggedByT12:   worst.flaggedByT12,
+      T12:            worst.T12,
+      T3_current:     worst.T3_current,
+      T3_prior:       worst.T3_prior,
+      zm:             worst.zm,
+      result:         worst.result,
+      flags,          // constituent metric flags
+      isCategoryFlag: true,
+    });
+  }
+  return catFlags.sort((a, b) => b.movement - a.movement);
+}
+
+// Build the metricBreakdown array used by fetchAMReasoning + renderAMDetailPanel.
+function _metricBreakdownForFlag(flag) {
+  if (flag.isCategoryFlag) {
+    return flag.flags.map(f => ({
+      name:      f.name,
+      T3current: f.T3_current,
+      T3prior:   f.T3_prior,
+      T12:       f.T12,
+      at:        f.at,
+    }));
+  }
+  return [{
+    name:      flag.name,
+    T3current: flag.T3_current,
+    T3prior:   flag.T3_prior,
+    T12:       flag.T12,
+    at:        flag.at,
+  }];
+}
+
+// ── renderAMAnalyzer ──────────────────────────────────────────
+
+function renderAMAnalyzer(results, months, purchasePrice, containerId) {
+  containerId = containerId || 'assetMgmtMode';
+  const container = document.getElementById(containerId);
+  if (!container) return;
+
+  if (window._amViewMode === undefined) window._amViewMode = 'metric';
+  if (window._amLimit    === undefined) window._amLimit    = 25;
+
+  const allFlags = window._amViewMode === 'category'
+    ? _buildCategoryFlags(results, months)
+    : _buildMetricFlags(results, months);
+
+  if (!allFlags.length) {
+    container.innerHTML = '<div style="font-family:var(--font-display);font-size:12px;color:var(--text-muted);padding:48px;text-align:center;">No material anomalies detected.</div>';
+    return;
+  }
+
+  const displayed = allFlags.slice(0, window._amLimit);
+
+  // ── toolbar ───────────────────────────────────────────────
+  function activeToggleStyle(active) {
+    return active
+      ? 'background:var(--accent);border:1px solid var(--accent);color:var(--bg-base);'
+      : 'background:var(--bg-elevated);border:1px solid var(--border);color:var(--text-muted);';
+  }
+  function activeLimitStyle(active) {
+    return active
+      ? 'background:var(--accent);border:1px solid var(--accent);color:var(--bg-base);'
+      : 'background:var(--bg-elevated);border:1px solid var(--border);color:var(--text-muted);';
+  }
+
+  const baseBtn = 'font-family:var(--font-display);font-size:10px;padding:5px 11px;border-radius:var(--radius);cursor:pointer;letter-spacing:0.3px;transition:opacity 0.15s;';
+
+  let html = '<div style="display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:18px;">';
+
+  // View-mode toggle
+  html += `<div style="display:flex;gap:4px;">
+    <button class="am-view-toggle" data-view="metric"   style="${baseBtn}${activeToggleStyle(window._amViewMode==='metric')}">&#x1F4CA; View by Metric</button>
+    <button class="am-view-toggle" data-view="category" style="${baseBtn}${activeToggleStyle(window._amViewMode==='category')}">&#x1F5C2; View by Category</button>
+  </div>`;
+
+  // Limit filter
+  html += '<div style="display:flex;align-items:center;gap:4px;margin-left:auto;">';
+  html += '<span style="font-family:var(--font-display);font-size:9px;color:var(--text-muted);letter-spacing:0.5px;">SHOW</span>';
+  for (const lim of [10, 25, 50, 100]) {
+    html += `<button class="am-limit-btn" data-limit="${lim}" style="${baseBtn}${activeLimitStyle(window._amLimit===lim)}">${lim}</button>`;
+  }
+  html += '</div></div>'; // end toolbar
+
+  // Stats line
+  html += `<div style="font-family:var(--font-display);font-size:9px;color:var(--text-muted);margin-bottom:16px;letter-spacing:0.4px;">${allFlags.length} flagged &middot; showing top ${displayed.length}</div>`;
+
+  // ── cards grid ────────────────────────────────────────────
+  html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px;">';
+
+  displayed.forEach((flag, idx) => {
+    const bc    = _borderColor(flag);
+    const mc    = _movementColor(flag);
+    const arrow = flag.at === 'pos' ? '\u2191' : flag.at === 'neg' ? '\u2193' : '\u21C5';
+
+    html += `
+      <div class="am-card" data-idx="${idx}"
+        style="background:var(--bg-elevated);border:1px solid var(--border);border-left:4px solid ${bc};border-radius:var(--radius);padding:14px;display:flex;flex-direction:column;gap:7px;">
+        <div class="am-card-category"
+          style="font-family:var(--font-display);font-size:9px;color:var(--text-muted);letter-spacing:0.6px;text-transform:uppercase;">${flag.section}</div>
+        <div class="am-card-name"
+          style="font-family:var(--font-display);font-size:12px;font-weight:700;color:var(--text-primary);line-height:1.3;">${flag.name}</div>
+        <div class="am-card-month"
+          style="font-family:var(--font-display);font-size:10px;color:var(--text-muted);">${flag.worstFlagMonth}</div>
+        <div class="am-card-movement"
+          style="font-family:var(--font-display);font-size:16px;font-weight:800;color:${mc};">${arrow} ${_fmtAmt(flag.movement)}</div>
+        <div class="am-card-trigger"
+          style="font-family:var(--font-display);font-size:9px;color:var(--text-muted);letter-spacing:0.4px;">${_triggerLabel(flag)}</div>
+        <div style="display:flex;gap:6px;margin-top:4px;">
+          <button class="am-btn-explain" data-idx="${idx}"
+            style="flex:1;${baseBtn}background:var(--accent);border:1px solid var(--accent);color:var(--bg-base);font-weight:700;">View Explanation</button>
+          <button class="am-btn-deep" data-idx="${idx}"
+            style="${baseBtn}background:var(--bg-base);border:1px solid var(--border);color:var(--text-muted);">Deep Research</button>
+        </div>
+      </div>`;
+  });
+
+  html += '</div>'; // end grid
+  container.innerHTML = html;
+
+  // Store for event handlers
+  container._amFlags   = allFlags;
+  container._amResults = results;
+  container._amMonths  = months;
+  container._amPP      = purchasePrice;
+
+  // ── event wiring ──────────────────────────────────────────
+
+  container.querySelectorAll('.am-view-toggle').forEach(btn => {
+    btn.addEventListener('click', () => {
+      window._amViewMode = btn.dataset.view;
+      renderAMAnalyzer(results, months, purchasePrice, containerId);
+    });
+  });
+
+  container.querySelectorAll('.am-limit-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      window._amLimit = parseInt(btn.dataset.limit, 10);
+      renderAMAnalyzer(results, months, purchasePrice, containerId);
+    });
+  });
+
+  // "View Explanation" — calls fetchAMReasoning + renderAMDetailPanel (added later)
+  container.querySelectorAll('.am-btn-explain').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const idx  = parseInt(btn.dataset.idx, 10);
+      const flag = allFlags[idx];
+      if (!flag) return;
+
+      // Derive property metadata from existing UI inputs
+      const stateVal  = document.getElementById('aiState')?.value || '';
+      const stateAbbr = (typeof Context !== 'undefined' && Context.STATE_ABBR)
+        ? (Context.STATE_ABBR[stateVal] || '')
+        : '';
+      const city         = document.getElementById('aiCity')?.value || '';
+      const propertyName = window._currentFileName || '';
+      const breakdown    = _metricBreakdownForFlag(flag);
+
+      // Show loading state in detail panel if renderAMDetailPanel already defined
+      if (typeof renderAMDetailPanel === 'function') {
+        renderAMDetailPanel(null, flag, breakdown, months);
+      }
+
+      try {
+        const apiResponse = await fetchAMReasoning(
+          flag, breakdown, stateAbbr, city, propertyName, purchasePrice, months
+        );
+        if (typeof renderAMDetailPanel === 'function') {
+          renderAMDetailPanel(apiResponse, flag, breakdown, months);
+        }
+      } catch (e) {
+        console.warn('[am-btn-explain] fetchAMReasoning failed:', e);
+      }
+    });
+  });
+
+  // "Deep Research" — replicates ai-engine.js ai-deep-btn pattern via #sidePanel
+  container.querySelectorAll('.am-btn-deep').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const idx  = parseInt(btn.dataset.idx, 10);
+      const flag = allFlags[idx];
+      if (!flag) return;
+
+      const r = flag.result?.res?.[flag.worstIdx];
+      if (!r) return;
+
+      const panel = document.getElementById('sidePanel');
+      const body  = document.getElementById('sidePanelBody');
+      if (!panel || !body) return;
+
+      panel.classList.remove('hidden');
+      body.innerHTML =
+        `<div style="margin-bottom:12px;font-family:var(--font-display);font-size:13px;font-weight:700;color:var(--text-primary);">${flag.name} \u2014 ${flag.worstFlagMonth}</div>` +
+        `<div class="ai-loading"><span class="spinner"></span> Claude is analyzing\u2026</div>` +
+        `<div id="aiDeepResult"></div>`;
+
+      const anomaly = {
+        metric:      flag.name,
+        month:       flag.worstFlagMonth,
+        value:       r.v,
+        zScore:      r.z != null ? r.z.toFixed(3) : null,
+        method:      r.zm,
+        direction:   r.at === 'pos' ? 'positive' : 'negative',
+        isMaterial:  r.mat,
+        isSeasonal:  r.st === 'seas',
+        change:      r.chv,
+        threshold:   flag.result?.th,
+        metricType:  flag.result?.mt,
+        section:     flag.result?.sec,
+      };
+
+      const ctx = typeof getAIContext === 'function' ? getAIContext() : {};
+      const ctxStr = (typeof buildDataContext === 'function' ? (window.cachedContext || buildDataContext()) : '');
+
+      fetch('/api/analyze-reasons', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: 'explain', context: ctxStr, anomaly, ...ctx }),
+      })
+      .then(res => { if (!res.ok) throw new Error('API error ' + res.status); return res.json(); })
+      .then(data => {
+        const deepEl = document.getElementById('aiDeepResult');
+        if (!deepEl) return;
+        let h = '';
+        if (data.primaryReason) {
+          h += `<div class="ai-card"><div class="ai-card-primary"><strong>${data.primaryReason.category || ''}:</strong> ${data.primaryReason.explanation || ''}</div></div>`;
+        }
+        if (data.alternatives?.length) {
+          h += '<div class="ai-card"><div class="ai-card-alts">';
+          data.alternatives.forEach((a, i) => {
+            h += `<div><strong>${i + 1}. ${a.category || ''}:</strong> ${a.explanation || ''}</div>`;
+          });
+          h += '</div></div>';
+        }
+        if (data.recommendation) {
+          h += `<div class="ai-insight"><p><strong>Recommendation:</strong> ${data.recommendation}</p></div>`;
+        }
+        if (!h) h = `<div class="ai-card"><div class="ai-card-primary">${data.raw || JSON.stringify(data)}</div></div>`;
+        deepEl.innerHTML = h;
+      })
+      .catch(e => {
+        const deepEl = document.getElementById('aiDeepResult');
+        if (deepEl) deepEl.innerHTML = `<div class="ai-error">Analysis failed: ${e.message}</div>`;
+      });
+    });
+  });
+}
+
+window.renderAMAnalyzer = renderAMAnalyzer;
