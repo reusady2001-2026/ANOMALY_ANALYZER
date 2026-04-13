@@ -314,7 +314,11 @@ function renderAMAnalyzer(results, months, purchasePrice, containerId) {
   container.querySelectorAll('.am-view-toggle').forEach(btn => {
     btn.addEventListener('click', () => {
       window._amViewMode = btn.dataset.view;
-      renderAMAnalyzer(results, months, purchasePrice, containerId);
+      if (btn.dataset.view === 'metric') {
+        renderAnalyzer();
+      } else {
+        renderAMAnalyzer(results, months, purchasePrice, containerId);
+      }
     });
   });
 
