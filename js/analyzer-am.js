@@ -103,7 +103,8 @@ function _movementColor(flag) {
 }
 
 function _triggerLabel(flag) {
-  const p = flag.flaggedByPrior, t = flag.flaggedByT12, c = flag.conflicting;
+  const p = flag.flaggedByT3 ?? flag.flaggedByPrior;
+  const t = flag.flaggedByT12, c = flag.conflicting;
   if (p && t && c) return 'T3 + T12 \u00b7 conflicting';
   if (p && t)      return 'T3 + T12';
   if (t)           return 'T12 drift';
@@ -113,19 +114,31 @@ function _triggerLabel(flag) {
 // Build a flag object for one metric result.
 // Returns null if the result has no material anomaly cells.
 function _metricFlag(result, months) {
+  const vals = result.res.map(rx => rx?.v || 0);
   let worstIdx = -1, worstMovement = 0;
-  for (const r of result.res) {
+
+  for (let i = 0; i < result.res.length; i++) {
+    const r = result.res[i];
     if (r.st !== 'anom') continue;
-    const movement = r.zm === 't3' ? Math.abs(r.chv || 0) : Math.abs(r.v || 0) * 12;
-    if (movement > worstMovement) { worstMovement = movement; worstIdx = r.mi; }
+    const n = i;
+    const T3_current = n >= 2 ? (vals[n] + vals[n-1] + vals[n-2]) * 4 : vals[n] * 12;
+    const T3_prior   = n >= 3 ? (vals[n-1] + vals[n-2] + vals[n-3]) * 4 : null;
+    const T12        = n >= 11 ? vals.slice(n-11, n+1).reduce((s, v) => s + v, 0) : null;
+    const deltaT3    = T3_prior != null ? T3_current - T3_prior : null;
+    const deltaT12   = T12      != null ? T3_current - T12      : null;
+    const movement   = Math.max(Math.abs(deltaT3 ?? 0), Math.abs(deltaT12 ?? 0));
+    if (movement > worstMovement) { worstMovement = movement; worstIdx = n; }
   }
+
   if (worstIdx < 0) return null;
 
   const r   = result.res[worstIdx];
   const n   = worstIdx;
-  const vals = result.res.map(rx => rx.v || 0);
-  const T3_current = n >= 2 ? (vals[n] + vals[n-1] + vals[n-2]) * 4 : (r.v || 0) * 12;
+  const T3_current = n >= 2 ? (vals[n] + vals[n-1] + vals[n-2]) * 4 : vals[n] * 12;
   const T3_prior   = n >= 3 ? (vals[n-1] + vals[n-2] + vals[n-3]) * 4 : null;
+  const T12        = n >= 11 ? vals.slice(n-11, n+1).reduce((s, v) => s + v, 0) : null;
+  const deltaT3    = T3_prior != null ? T3_current - T3_prior : null;
+  const deltaT12   = T12      != null ? T3_current - T12      : null;
   const cat = _metricToCategory.get(result.name) || (result.isInc ? 'OTHER INCOME' : 'OTHER EXPENSES');
 
   return {
@@ -140,9 +153,11 @@ function _metricFlag(result, months) {
     flaggedByPrior: r.flaggedByPrior || false,
     flaggedByT12:   r.flaggedByT12   || false,
     conflicting:    r.conflicting    || false,
-    T12:            r.T12,
     T3_current,
     T3_prior,
+    T12,
+    deltaT3,
+    deltaT12,
     zm:             r.zm,
     result,
   };
@@ -158,42 +173,81 @@ function _buildMetricFlags(results, months) {
   return flags.sort((a, b) => b.movement - a.movement);
 }
 
-function _buildCategoryFlags(results, months) {
-  const metricFlags = _buildMetricFlags(results, months);
-  const catMap = new Map();
-  for (const f of metricFlags) {
-    if (!catMap.has(f.section)) catMap.set(f.section, []);
-    catMap.get(f.section).push(f);
-  }
+function _buildCategoryFlags(results, months, purchasePrice) {
+  const matTh = purchasePrice * 0.001;
   const catFlags = [];
-  for (const [cat, flags] of catMap) {
-    const worst = flags.reduce((a, b) => a.movement > b.movement ? a : b);
-    const totalMovement = flags.reduce((s, f) => s + f.movement, 0);
-    const posCount = flags.filter(f => f.at === 'pos').length;
-    const negCount = flags.filter(f => f.at === 'neg').length;
-    const at = posCount > negCount ? 'pos' : negCount > posCount ? 'neg' : 'mixed';
-    catFlags.push({
-      name:           cat,
-      section:        cat,
-      isInc:          INCOME_CATEGORIES.has(cat),
-      worstIdx:       worst.worstIdx,
-      worstFlagMonth: worst.worstFlagMonth,
-      worstMonthLabel:worst.worstMonthLabel,
-      movement:       totalMovement,
-      at,
-      conflicting:    flags.some(f => f.conflicting),
-      flaggedByPrior: worst.flaggedByPrior,
-      flaggedByT12:   worst.flaggedByT12,
-      T12:            worst.T12,
-      T3_current:     worst.T3_current,
-      T3_prior:       worst.T3_prior,
-      zm:             worst.zm,
-      result:         worst.result,
-      flags,          // constituent metric flags
-      isCategoryFlag: true,
-    });
+
+  for (const [categoryName, metricNames] of Object.entries(CATEGORY_MAP)) {
+    // Find all results belonging to this category
+    const memberResults = results.filter(r => r && metricNames.includes(r.name));
+    if (!memberResults.length) continue;
+
+    const isInc = INCOME_CATEGORIES.has(categoryName);
+
+    // For each month, compute category-level T3/T12 by summing across members
+    for (let n = 0; n < months.length; n++) {
+      // Need at least 2 prior months for T3_current
+      if (n < 2) continue;
+
+      // Sum raw monthly values across all member metrics at each relevant index
+      const sum = idx => memberResults.reduce((s, r) => s + (r.res[idx]?.v || 0), 0);
+
+      const T3_current = (sum(n) + sum(n-1) + sum(n-2)) * 4;
+      const T3_prior   = n >= 3 ? (sum(n-1) + sum(n-2) + sum(n-3)) * 4 : null;
+      const T12        = n >= 11
+        ? Array.from({length: 12}, (_, k) => sum(n - 11 + k)).reduce((s, v) => s + v, 0)
+        : null;
+
+      const deltaT3  = T3_prior != null ? T3_current - T3_prior : null;
+      const deltaT12 = T12      != null ? T3_current - T12      : null;
+      const movement = Math.max(Math.abs(deltaT3 ?? 0), Math.abs(deltaT12 ?? 0));
+
+      if (movement < matTh) continue;
+
+      const flaggedByT3  = deltaT3  != null && Math.abs(deltaT3)  >= matTh;
+      const flaggedByT12 = deltaT12 != null && Math.abs(deltaT12) >= matTh;
+      const conflicting  = flaggedByT3 && flaggedByT12 &&
+        Math.sign(deltaT3) !== Math.sign(deltaT12);
+
+      // Direction: use whichever delta is larger in absolute terms
+      const primaryDelta = (Math.abs(deltaT3 ?? 0) >= Math.abs(deltaT12 ?? 0))
+        ? deltaT3 : deltaT12;
+      // pos = good for P&L: income up or expense down
+      const at = primaryDelta == null ? 'mixed'
+        : isInc ? (primaryDelta > 0 ? 'pos' : 'neg')
+                : (primaryDelta < 0 ? 'pos' : 'neg');
+
+      catFlags.push({
+        name:           categoryName,
+        section:        categoryName,
+        isInc,
+        worstIdx:       n,
+        worstFlagMonth: months[n] || String(n),
+        worstMonthLabel:months[n] || String(n),
+        movement,
+        deltaT3,
+        deltaT12,
+        T3_current,
+        T3_prior,
+        T12,
+        at,
+        flaggedByT3,
+        flaggedByT12,
+        conflicting,
+        isCategoryFlag: true,
+        memberResults,
+      });
+    }
   }
-  return catFlags.sort((a, b) => b.movement - a.movement);
+
+  // One flag per category: keep only the month with the highest movement
+  const best = new Map();
+  for (const f of catFlags) {
+    const prev = best.get(f.name);
+    if (!prev || f.movement > prev.movement) best.set(f.name, f);
+  }
+
+  return Array.from(best.values()).sort((a, b) => b.movement - a.movement);
 }
 
 // Build the metricBreakdown array used by fetchAMReasoning + renderAMDetailPanel.
@@ -231,7 +285,7 @@ function renderAMAnalyzer(results, months, purchasePrice, containerId) {
   if (window._amLimit    === undefined) window._amLimit    = 25;
 
   const allFlags = window._amViewMode === 'category'
-    ? _buildCategoryFlags(results, months)
+    ? _buildCategoryFlags(results, months, purchasePrice)
     : _buildMetricFlags(results, months);
 
   if (!allFlags.length) {
@@ -278,9 +332,25 @@ function renderAMAnalyzer(results, months, purchasePrice, containerId) {
   html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px;">';
 
   displayed.forEach((flag, idx) => {
-    const bc    = _borderColor(flag);
-    const mc    = _movementColor(flag);
-    const arrow = flag.at === 'pos' ? '\u2191' : flag.at === 'neg' ? '\u2193' : '\u21C5';
+    const bc = _borderColor(flag);
+
+    // Per-row color: income up=green/down=red; expense up=red/down=green
+    function deltaColor(delta) {
+      if (delta == null) return 'var(--text-muted)';
+      const up = delta > 0;
+      return (flag.isInc ? up : !up) ? 'var(--green)' : 'var(--red)';
+    }
+    function deltaArrow(delta) {
+      if (delta == null) return '';
+      return delta > 0 ? '\u2191' : '\u2193';
+    }
+
+    const t3Row = flag.deltaT3 != null
+      ? `<div style="font-family:var(--font-display);font-size:13px;font-weight:800;color:${deltaColor(flag.deltaT3)};">${deltaArrow(flag.deltaT3)} ${_fmtAmt(Math.abs(flag.deltaT3))} <span style="font-size:9px;color:var(--text-muted);font-weight:400;">T3 vs prior</span></div>`
+      : '';
+    const t12Row = flag.deltaT12 != null
+      ? `<div style="font-family:var(--font-display);font-size:13px;font-weight:800;color:${deltaColor(flag.deltaT12)};">${deltaArrow(flag.deltaT12)} ${_fmtAmt(Math.abs(flag.deltaT12))} <span style="font-size:9px;color:var(--text-muted);font-weight:400;">T3 vs T12</span></div>`
+      : '';
 
     html += `
       <div class="am-card" data-idx="${idx}"
@@ -291,8 +361,7 @@ function renderAMAnalyzer(results, months, purchasePrice, containerId) {
           style="font-family:var(--font-display);font-size:12px;font-weight:700;color:var(--text-primary);line-height:1.3;">${flag.name}</div>
         <div class="am-card-month"
           style="font-family:var(--font-display);font-size:10px;color:var(--text-muted);">${flag.worstFlagMonth}</div>
-        <div class="am-card-movement"
-          style="font-family:var(--font-display);font-size:16px;font-weight:800;color:${mc};">${arrow} ${_fmtAmt(flag.movement)}</div>
+        <div class="am-card-deltas" style="display:flex;flex-direction:column;gap:3px;">${t3Row}${t12Row}</div>
         <div class="am-card-trigger"
           style="font-family:var(--font-display);font-size:9px;color:var(--text-muted);letter-spacing:0.4px;">${_triggerLabel(flag)}</div>
         <div style="display:flex;gap:6px;margin-top:4px;">
@@ -448,7 +517,7 @@ function renderAMDetailPanel(apiResponse, flag, metricBreakdown, months) {
     panel = document.createElement('div');
     panel.id = 'amDetailPanel';
     panel.className = 'side-panel';
-    panel.style.cssText = 'z-index:220;transform:translateX(100%);transition:transform 0.25s ease;';
+    panel.style.cssText = 'z-index:220;transform:translateX(100%);transition:transform 0.25s ease;min-width:480px;';
     panel.innerHTML =
       '<div class="side-panel-header">' +
         '<h3 style="font-family:var(--font-display);font-size:11px;font-weight:700;letter-spacing:1px;color:var(--text-primary);margin:0;">ASSET DETAIL</h3>' +
@@ -510,17 +579,82 @@ function renderAMDetailPanel(apiResponse, flag, metricBreakdown, months) {
     html += '</div>';
   }
 
-  // ─ 3. Driver Breakdown table ────────────────────────────────
-  // All metrics measured at the same reference month so totals are meaningful.
-  // T3 Now = (3-month sum) × 4 annualized; T3 Prior = same one month earlier; T12 = trailing 12-month sum.
-  if (metricBreakdown?.length) {
-    const thS = 'padding:5px 8px;text-align:right;font-family:var(--font-display);font-size:9px;font-weight:700;letter-spacing:0.5px;color:var(--text-muted);text-transform:uppercase;border-bottom:1px solid var(--border);white-space:nowrap;';
-    const thL = thS.replace('text-align:right','text-align:left');
-    const tdS = 'padding:5px 8px;text-align:right;font-family:var(--font-display);font-size:10px;color:var(--text-secondary);border-bottom:1px solid var(--border);white-space:nowrap;';
-    const tdL = tdS.replace('text-align:right','text-align:left')+'color:var(--text-primary);max-width:130px;overflow:hidden;text-overflow:ellipsis;';
-    const tdB = tdS+'font-weight:700;color:var(--text-primary);border-bottom:none;border-top:2px solid var(--border);';
-    const tdBL= tdB.replace('text-align:right','text-align:left');
+  // ─ 3. Category metrics table OR single-metric Driver Breakdown ─
+  const thS = 'padding:5px 8px;text-align:right;font-family:var(--font-display);font-size:9px;font-weight:700;letter-spacing:0.5px;color:var(--text-muted);text-transform:uppercase;border-bottom:1px solid var(--border);white-space:nowrap;';
+  const thL = thS.replace('text-align:right','text-align:left');
+  const tdS = 'padding:5px 8px;text-align:right;font-family:var(--font-display);font-size:10px;color:var(--text-secondary);border-bottom:1px solid var(--border);white-space:nowrap;';
+  const tdL = tdS.replace('text-align:right','text-align:left')+'color:var(--text-primary);max-width:140px;overflow:hidden;text-overflow:ellipsis;';
+  const tdB = tdS+'font-weight:700;color:var(--text-primary);border-bottom:none;border-top:2px solid var(--border);';
+  const tdBL= tdB.replace('text-align:right','text-align:left');
 
+  if (flag?.isCategoryFlag && flag.memberResults?.length) {
+    const refN   = flag.worstIdx;
+    const catInc = flag.isInc;
+
+    function dCol(delta) {
+      if (delta == null) return '';
+      const good = catInc ? delta > 0 : delta < 0;
+      return ';color:' + (good ? 'var(--green)' : 'var(--red)');
+    }
+    function dFmt(delta) {
+      if (delta == null) return '\u2014';
+      return (delta > 0 ? '+' : '') + _fmtAmt(delta);
+    }
+
+    html += '<div style="margin-bottom:16px;">';
+    html += '<div style="font-family:var(--font-display);font-size:9px;font-weight:700;letter-spacing:1px;color:var(--text-muted);text-transform:uppercase;margin-bottom:3px;">Metrics in Category</div>';
+    html += '<div style="font-family:var(--font-display);font-size:9px;color:var(--text-muted);margin-bottom:8px;">Annualized run rates at ' + (flag.worstFlagMonth||'reference month') + ' &middot; T3\u00d74 = quarterly \u00d7 4 &middot; bold = flagged metric</div>';
+    html += '<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;">';
+    html += '<thead><tr>';
+    html += '<th style="' + thL + '">Metric</th>';
+    html += '<th style="' + thS + '" title="3-month sum \u00d7 4 at reference month">T3 Now</th>';
+    html += '<th style="' + thS + '" title="3-month sum \u00d7 4 one month prior">T3 Prior</th>';
+    html += '<th style="' + thS + '" title="Trailing 12-month sum">T12</th>';
+    html += '<th style="' + thS + '">\u0394T3</th>';
+    html += '<th style="' + thS + '">\u0394T12</th>';
+    html += '</tr></thead><tbody>';
+
+    let sumCur=0, sumPri=0, sumT12=0, hasPri=false, hasTwelve=false;
+
+    for (const r of flag.memberResults) {
+      const vals       = r.res.map(rx => rx?.v || 0);
+      const n          = refN;
+      const T3_current = n >= 2 ? (vals[n]+vals[n-1]+vals[n-2])*4 : vals[n]*12;
+      const T3_prior   = n >= 3 ? (vals[n-1]+vals[n-2]+vals[n-3])*4 : null;
+      const T12        = n >= 11 ? vals.slice(n-11,n+1).reduce((s,v)=>s+v,0) : null;
+      const deltaT3    = T3_prior != null ? T3_current - T3_prior : null;
+      const deltaT12   = T12      != null ? T3_current - T12      : null;
+      const hasAnom    = r.res[n]?.st === 'anom';
+
+      sumCur += T3_current;
+      if (T3_prior != null) { sumPri  += T3_prior; hasPri    = true; }
+      if (T12      != null) { sumT12  += T12;       hasTwelve = true; }
+
+      const anomStyle = hasAnom ? 'font-weight:700;border-left:2px solid var(--accent);padding-left:6px;' : '';
+      html += '<tr>';
+      html += '<td style="' + tdL + anomStyle + '">' + (r.name||'') + '</td>';
+      html += '<td style="' + tdS + '">' + _fmtAmt(T3_current) + '</td>';
+      html += '<td style="' + tdS + '">' + (T3_prior != null ? _fmtAmt(T3_prior) : '\u2014') + '</td>';
+      html += '<td style="' + tdS + '">' + (T12      != null ? _fmtAmt(T12)      : '\u2014') + '</td>';
+      html += '<td style="' + tdS + dCol(deltaT3)  + '">' + dFmt(deltaT3)  + '</td>';
+      html += '<td style="' + tdS + dCol(deltaT12) + '">' + dFmt(deltaT12) + '</td>';
+      html += '</tr>';
+    }
+
+    const totalDT3  = hasPri     ? sumCur - sumPri  : null;
+    const totalDT12 = hasTwelve  ? sumCur - sumT12  : null;
+    html += '<tr>';
+    html += '<td style="' + tdBL + '">Total</td>';
+    html += '<td style="' + tdB  + '">' + _fmtAmt(sumCur)  + '</td>';
+    html += '<td style="' + tdB  + '">' + (hasPri    ? _fmtAmt(sumPri)  : '\u2014') + '</td>';
+    html += '<td style="' + tdB  + '">' + (hasTwelve ? _fmtAmt(sumT12)  : '\u2014') + '</td>';
+    html += '<td style="' + tdB  + dCol(totalDT3)  + '">' + dFmt(totalDT3)  + '</td>';
+    html += '<td style="' + tdB  + dCol(totalDT12) + '">' + dFmt(totalDT12) + '</td>';
+    html += '</tr>';
+    html += '</tbody></table></div></div>';
+
+  } else if (metricBreakdown?.length) {
+    // ── Single-metric Driver Breakdown ────────────────────────
     html += '<div style="margin-bottom:16px;">';
     html += '<div style="font-family:var(--font-display);font-size:9px;font-weight:700;letter-spacing:1px;color:var(--text-muted);text-transform:uppercase;margin-bottom:3px;">Driver Breakdown</div>';
     html += '<div style="font-family:var(--font-display);font-size:9px;color:var(--text-muted);margin-bottom:8px;">Annualized run rates at ' + (flag?.worstFlagMonth||'reference month') + ' &middot; T3\u00d74 = quarterly \u00d7 4</div>';
@@ -552,8 +686,8 @@ function renderAMDetailPanel(apiResponse, flag, metricBreakdown, months) {
     if (metricBreakdown.length > 1) {
       html += '<tr><td style="' + tdBL + '">Total</td>';
       html += '<td style="' + tdB  + '">' + _fmtAmt(sumCur)  + '</td>';
-      html += '<td style="' + tdB  + '">' + (hasPri     ? _fmtAmt(sumPri)  : '\u2014') + '</td>';
-      html += '<td style="' + tdB  + '">' + (hasTwelve  ? _fmtAmt(sumT12)  : '\u2014') + '</td>';
+      html += '<td style="' + tdB  + '">' + (hasPri    ? _fmtAmt(sumPri)  : '\u2014') + '</td>';
+      html += '<td style="' + tdB  + '">' + (hasTwelve ? _fmtAmt(sumT12)  : '\u2014') + '</td>';
       html += '</tr>';
     }
     html += '</tbody></table></div></div>';
@@ -570,11 +704,11 @@ function renderAMDetailPanel(apiResponse, flag, metricBreakdown, months) {
 
     // Build per-box values
     const boxVals = [];
-    if (flag.isCategoryFlag && flag.flags?.length) {
+    if (flag.isCategoryFlag && flag.memberResults?.length) {
       for (let j = 0; j < winLen; j++) {
         const mi = startMi + j;
         let tot = 0;
-        for (const f of flag.flags) tot += f.result?.res[mi]?.v || 0;
+        for (const r of flag.memberResults) tot += r.res[mi]?.v || 0;
         boxVals.push(tot);
       }
     } else {
