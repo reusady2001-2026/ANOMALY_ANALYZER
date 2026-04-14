@@ -113,19 +113,31 @@ function _triggerLabel(flag) {
 // Build a flag object for one metric result.
 // Returns null if the result has no material anomaly cells.
 function _metricFlag(result, months) {
+  const vals = result.res.map(rx => rx?.v || 0);
   let worstIdx = -1, worstMovement = 0;
-  for (const r of result.res) {
+
+  for (let i = 0; i < result.res.length; i++) {
+    const r = result.res[i];
     if (r.st !== 'anom') continue;
-    const movement = r.zm === 't3' ? Math.abs(r.chv || 0) : Math.abs(r.v || 0) * 12;
-    if (movement > worstMovement) { worstMovement = movement; worstIdx = r.mi; }
+    const n = i;
+    const T3_current = n >= 2 ? (vals[n] + vals[n-1] + vals[n-2]) * 4 : vals[n] * 12;
+    const T3_prior   = n >= 3 ? (vals[n-1] + vals[n-2] + vals[n-3]) * 4 : null;
+    const T12        = n >= 11 ? vals.slice(n-11, n+1).reduce((s, v) => s + v, 0) : null;
+    const deltaT3    = T3_prior != null ? T3_current - T3_prior : null;
+    const deltaT12   = T12      != null ? T3_current - T12      : null;
+    const movement   = Math.max(Math.abs(deltaT3 ?? 0), Math.abs(deltaT12 ?? 0));
+    if (movement > worstMovement) { worstMovement = movement; worstIdx = n; }
   }
+
   if (worstIdx < 0) return null;
 
   const r   = result.res[worstIdx];
   const n   = worstIdx;
-  const vals = result.res.map(rx => rx.v || 0);
-  const T3_current = n >= 2 ? (vals[n] + vals[n-1] + vals[n-2]) * 4 : (r.v || 0) * 12;
+  const T3_current = n >= 2 ? (vals[n] + vals[n-1] + vals[n-2]) * 4 : vals[n] * 12;
   const T3_prior   = n >= 3 ? (vals[n-1] + vals[n-2] + vals[n-3]) * 4 : null;
+  const T12        = n >= 11 ? vals.slice(n-11, n+1).reduce((s, v) => s + v, 0) : null;
+  const deltaT3    = T3_prior != null ? T3_current - T3_prior : null;
+  const deltaT12   = T12      != null ? T3_current - T12      : null;
   const cat = _metricToCategory.get(result.name) || (result.isInc ? 'OTHER INCOME' : 'OTHER EXPENSES');
 
   return {
@@ -140,9 +152,11 @@ function _metricFlag(result, months) {
     flaggedByPrior: r.flaggedByPrior || false,
     flaggedByT12:   r.flaggedByT12   || false,
     conflicting:    r.conflicting    || false,
-    T12:            r.T12,
     T3_current,
     T3_prior,
+    T12,
+    deltaT3,
+    deltaT12,
     zm:             r.zm,
     result,
   };
