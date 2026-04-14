@@ -172,42 +172,81 @@ function _buildMetricFlags(results, months) {
   return flags.sort((a, b) => b.movement - a.movement);
 }
 
-function _buildCategoryFlags(results, months) {
-  const metricFlags = _buildMetricFlags(results, months);
-  const catMap = new Map();
-  for (const f of metricFlags) {
-    if (!catMap.has(f.section)) catMap.set(f.section, []);
-    catMap.get(f.section).push(f);
-  }
+function _buildCategoryFlags(results, months, purchasePrice) {
+  const matTh = purchasePrice * 0.001;
   const catFlags = [];
-  for (const [cat, flags] of catMap) {
-    const worst = flags.reduce((a, b) => a.movement > b.movement ? a : b);
-    const totalMovement = flags.reduce((s, f) => s + f.movement, 0);
-    const posCount = flags.filter(f => f.at === 'pos').length;
-    const negCount = flags.filter(f => f.at === 'neg').length;
-    const at = posCount > negCount ? 'pos' : negCount > posCount ? 'neg' : 'mixed';
-    catFlags.push({
-      name:           cat,
-      section:        cat,
-      isInc:          INCOME_CATEGORIES.has(cat),
-      worstIdx:       worst.worstIdx,
-      worstFlagMonth: worst.worstFlagMonth,
-      worstMonthLabel:worst.worstMonthLabel,
-      movement:       totalMovement,
-      at,
-      conflicting:    flags.some(f => f.conflicting),
-      flaggedByPrior: worst.flaggedByPrior,
-      flaggedByT12:   worst.flaggedByT12,
-      T12:            worst.T12,
-      T3_current:     worst.T3_current,
-      T3_prior:       worst.T3_prior,
-      zm:             worst.zm,
-      result:         worst.result,
-      flags,          // constituent metric flags
-      isCategoryFlag: true,
-    });
+
+  for (const [categoryName, metricNames] of Object.entries(CATEGORY_MAP)) {
+    // Find all results belonging to this category
+    const memberResults = results.filter(r => r && metricNames.includes(r.name));
+    if (!memberResults.length) continue;
+
+    const isInc = INCOME_CATEGORIES.has(categoryName);
+
+    // For each month, compute category-level T3/T12 by summing across members
+    for (let n = 0; n < months.length; n++) {
+      // Need at least 2 prior months for T3_current
+      if (n < 2) continue;
+
+      // Sum raw monthly values across all member metrics at each relevant index
+      const sum = idx => memberResults.reduce((s, r) => s + (r.res[idx]?.v || 0), 0);
+
+      const T3_current = (sum(n) + sum(n-1) + sum(n-2)) * 4;
+      const T3_prior   = n >= 3 ? (sum(n-1) + sum(n-2) + sum(n-3)) * 4 : null;
+      const T12        = n >= 11
+        ? Array.from({length: 12}, (_, k) => sum(n - 11 + k)).reduce((s, v) => s + v, 0)
+        : null;
+
+      const deltaT3  = T3_prior != null ? T3_current - T3_prior : null;
+      const deltaT12 = T12      != null ? T3_current - T12      : null;
+      const movement = Math.max(Math.abs(deltaT3 ?? 0), Math.abs(deltaT12 ?? 0));
+
+      if (movement < matTh) continue;
+
+      const flaggedByT3  = deltaT3  != null && Math.abs(deltaT3)  >= matTh;
+      const flaggedByT12 = deltaT12 != null && Math.abs(deltaT12) >= matTh;
+      const conflicting  = flaggedByT3 && flaggedByT12 &&
+        Math.sign(deltaT3) !== Math.sign(deltaT12);
+
+      // Direction: use whichever delta is larger in absolute terms
+      const primaryDelta = (Math.abs(deltaT3 ?? 0) >= Math.abs(deltaT12 ?? 0))
+        ? deltaT3 : deltaT12;
+      // pos = good for P&L: income up or expense down
+      const at = primaryDelta == null ? 'mixed'
+        : isInc ? (primaryDelta > 0 ? 'pos' : 'neg')
+                : (primaryDelta < 0 ? 'pos' : 'neg');
+
+      catFlags.push({
+        name:           categoryName,
+        section:        categoryName,
+        isInc,
+        worstIdx:       n,
+        worstFlagMonth: months[n] || String(n),
+        worstMonthLabel:months[n] || String(n),
+        movement,
+        deltaT3,
+        deltaT12,
+        T3_current,
+        T3_prior,
+        T12,
+        at,
+        flaggedByT3,
+        flaggedByT12,
+        conflicting,
+        isCategoryFlag: true,
+        memberResults,
+      });
+    }
   }
-  return catFlags.sort((a, b) => b.movement - a.movement);
+
+  // One flag per category: keep only the month with the highest movement
+  const best = new Map();
+  for (const f of catFlags) {
+    const prev = best.get(f.name);
+    if (!prev || f.movement > prev.movement) best.set(f.name, f);
+  }
+
+  return Array.from(best.values()).sort((a, b) => b.movement - a.movement);
 }
 
 // Build the metricBreakdown array used by fetchAMReasoning + renderAMDetailPanel.
@@ -245,7 +284,7 @@ function renderAMAnalyzer(results, months, purchasePrice, containerId) {
   if (window._amLimit    === undefined) window._amLimit    = 25;
 
   const allFlags = window._amViewMode === 'category'
-    ? _buildCategoryFlags(results, months)
+    ? _buildCategoryFlags(results, months, purchasePrice)
     : _buildMetricFlags(results, months);
 
   if (!allFlags.length) {
