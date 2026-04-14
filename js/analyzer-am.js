@@ -103,7 +103,8 @@ function _movementColor(flag) {
 }
 
 function _triggerLabel(flag) {
-  const p = flag.flaggedByPrior, t = flag.flaggedByT12, c = flag.conflicting;
+  const p = flag.flaggedByT3 ?? flag.flaggedByPrior;
+  const t = flag.flaggedByT12, c = flag.conflicting;
   if (p && t && c) return 'T3 + T12 \u00b7 conflicting';
   if (p && t)      return 'T3 + T12';
   if (t)           return 'T12 drift';
@@ -331,9 +332,25 @@ function renderAMAnalyzer(results, months, purchasePrice, containerId) {
   html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px;">';
 
   displayed.forEach((flag, idx) => {
-    const bc    = _borderColor(flag);
-    const mc    = _movementColor(flag);
-    const arrow = flag.at === 'pos' ? '\u2191' : flag.at === 'neg' ? '\u2193' : '\u21C5';
+    const bc = _borderColor(flag);
+
+    // Per-row color: income up=green/down=red; expense up=red/down=green
+    function deltaColor(delta) {
+      if (delta == null) return 'var(--text-muted)';
+      const up = delta > 0;
+      return (flag.isInc ? up : !up) ? 'var(--green)' : 'var(--red)';
+    }
+    function deltaArrow(delta) {
+      if (delta == null) return '';
+      return delta > 0 ? '\u2191' : '\u2193';
+    }
+
+    const t3Row = flag.deltaT3 != null
+      ? `<div style="font-family:var(--font-display);font-size:13px;font-weight:800;color:${deltaColor(flag.deltaT3)};">${deltaArrow(flag.deltaT3)} ${_fmtAmt(Math.abs(flag.deltaT3))} <span style="font-size:9px;color:var(--text-muted);font-weight:400;">T3 vs prior</span></div>`
+      : '';
+    const t12Row = flag.deltaT12 != null
+      ? `<div style="font-family:var(--font-display);font-size:13px;font-weight:800;color:${deltaColor(flag.deltaT12)};">${deltaArrow(flag.deltaT12)} ${_fmtAmt(Math.abs(flag.deltaT12))} <span style="font-size:9px;color:var(--text-muted);font-weight:400;">T3 vs T12</span></div>`
+      : '';
 
     html += `
       <div class="am-card" data-idx="${idx}"
@@ -344,8 +361,7 @@ function renderAMAnalyzer(results, months, purchasePrice, containerId) {
           style="font-family:var(--font-display);font-size:12px;font-weight:700;color:var(--text-primary);line-height:1.3;">${flag.name}</div>
         <div class="am-card-month"
           style="font-family:var(--font-display);font-size:10px;color:var(--text-muted);">${flag.worstFlagMonth}</div>
-        <div class="am-card-movement"
-          style="font-family:var(--font-display);font-size:16px;font-weight:800;color:${mc};">${arrow} ${_fmtAmt(flag.movement)}</div>
+        <div class="am-card-deltas" style="display:flex;flex-direction:column;gap:3px;">${t3Row}${t12Row}</div>
         <div class="am-card-trigger"
           style="font-family:var(--font-display);font-size:9px;color:var(--text-muted);letter-spacing:0.4px;">${_triggerLabel(flag)}</div>
         <div style="display:flex;gap:6px;margin-top:4px;">
