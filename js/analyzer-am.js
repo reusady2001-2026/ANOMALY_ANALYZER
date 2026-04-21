@@ -184,8 +184,10 @@ function _buildCategoryFlags(results, months, purchasePrice) {
 
     const isInc = INCOME_CATEGORIES.has(categoryName);
 
-    // For each month, compute category-level T3/T12 by summing across members
-    for (let n = 0; n < months.length; n++) {
+    // For each month, compute category-level T3/T12 by summing across members.
+    // Stop at months.length - SKIP so provisional last months are never flagged.
+    const ae = months.length - SKIP;
+    for (let n = 0; n < ae; n++) {
       // Need at least 2 prior months for T3_current
       if (n < 2) continue;
 
